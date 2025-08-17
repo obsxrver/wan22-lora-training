@@ -13,8 +13,9 @@ No differences.
 
 ## 2. VastAI
 
-New command:
+Launch an instance using the PyTorch (Vast) template on https://cloud.vast.ai (recommend using an H100)
 
+Set up the environment:
 ```bash
 git clone --recursive https://github.com/kohya-ss/musubi-tuner.git
 cd musubi-tuner
@@ -32,6 +33,7 @@ pip install torch==2.7.0 torchvision==0.22.0 xformers==0.0.30 --index-url https:
 Downloading the necessary models:
 
 ```bash
+cd /workspace/musubi-tuner
 huggingface-cli download Wan-AI/Wan2.1-I2V-14B-720P models_t5_umt5-xxl-enc-bf16.pth --local-dir models/text_encoders
 huggingface-cli download Comfy-Org/Wan_2.1_ComfyUI_repackaged split_files/vae/wan_2.1_vae.safetensors --local-dir models/vae
 huggingface-cli download Comfy-Org/Wan_2.2_ComfyUI_Repackaged split_files/diffusion_models/wan2.2_t2v_high_noise_14B_fp16.safetensors --local-dir models/diffusion_models
