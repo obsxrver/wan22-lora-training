@@ -1,5 +1,6 @@
-# WAN2.2 LoRa Training Workflow TLDR - AI_Characters (archive)
-((I did not make this guide, I am just archiving it here for reference. Original author: https://civitai.com/user/AI_Characters))
+# WAN2.2 LoRa Training Workflow TLDR - AI_Characters
+(I did not make this guide, I am just archiving it for reference because it is very good. Original author: https://civitai.com/user/AI_Characters)
+
 The basis for this workflow is my original WAN2.1 training guide: [My WAN2.1 LoRa training workflow TLDR | Civitai](https://civitai.com/articles/4996/my-wan21-lora-training-workflow-tldr)
 
 In this new article, I will explain only the necessary differences between WAN2.2 and WAN2.1 training.
