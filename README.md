@@ -1,5 +1,6 @@
 # WAN2.2 LoRa Training Workflow - AI_Characters
-(I did not make this guide, I am just archiving it from [(CivitAI}](https://civitai.com/articles/17740). [(Original Author: AI_Characters)](https://civitai.com/user/AI_Characters)
+### [(Original Author: AI_Characters)](https://civitai.com/user/AI_Characters)
+*I did not make this guide. I am just archiving it from [(CivitAI}](https://civitai.com/articles/17740)* 
 
 The basis for this workflow is my original WAN2.1 training guide: [My WAN2.1 LoRa training workflow TLDR | Civitai](https://civitai.com/articles/4996/my-wan21-lora-training-workflow-tldr)
 
