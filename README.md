@@ -8,11 +8,7 @@ In this new article, I will explain only the necessary differences between WAN2.
 
 For everything else, consult the old guide.
 
-## 1. Dataset and Captions
-
-No differences.
-
-## 2. VastAI
+## 1. VastAI
 
 Launch an instance using the PyTorch (Vast) template on https://cloud.vast.ai (recommend using an H100)
 
@@ -41,6 +37,8 @@ huggingface-cli download Comfy-Org/Wan_2.2_ComfyUI_Repackaged split_files/diffus
 huggingface-cli download Comfy-Org/Wan_2.2_ComfyUI_Repackaged split_files/diffusion_models/wan2.2_t2v_low_noise_14B_fp16.safetensors --local-dir models/diffusion_models
 ```
 
+## 2. Dataset and Captions
+
 Put your images and captions into `/workspace/musubi-tuner/dataset/`.
 
 Create the following `dataset.toml` and put it into `/workspace/musubi-tuner/dataset/`:
@@ -63,7 +61,7 @@ num_repeats = 1 # optional, default is 1. Number of times to repeat the dataset.
 # other datasets can be added here. each dataset can have different configurations
 ```
 
-## 4. Training
+## 3. Training
 
 Use the following command whenever you open a new terminal window (in order to activate the venv and be in the correct folder):
 
