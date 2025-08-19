@@ -2,11 +2,6 @@
 ### [(Original Author: AI_Characters)](https://civitai.com/user/AI_Characters)
 *I did not make this guide. I am just archiving it from [(CivitAI}](https://civitai.com/articles/17740)* 
 
-The basis for this workflow is my original WAN2.1 training guide: [My WAN2.1 LoRa training workflow TLDR | Civitai](https://civitai.com/articles/4996/my-wan21-lora-training-workflow-tldr)
-
-In this new article, I will explain only the necessary differences between WAN2.2 and WAN2.1 training.
-
-For everything else, consult the old guide.
 
 ## 1. VastAI
 
