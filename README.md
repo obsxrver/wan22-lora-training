@@ -3,6 +3,27 @@
 *I did not make this guide. I am just archiving it from [(CivitAI}](https://civitai.com/articles/17740)* 
 
 
+## Automation Scripts
+
+This repository includes helpers to streamline setup and training on Vast.ai.
+
+- `vast_provision.sh` provisions a fresh instance, installs dependencies, downloads the required models, and pulls `train_helper.py` into `/workspace`.
+- `train_helper.py` caches latents and caption embeddings, writes a default `accelerate` config, and launches the high and low noise training runs.
+  - `--dataset-config` (default: `dataset/dataset.toml`) points to your dataset configuration.
+  - `--num-samples` (default: `1`) adjusts how often checkpoints are saved; the training scripts save every `100 / num_samples` epochs.
+  - `--output-name` (default: `my_wan_lora`) selects the base name for the LoRAs; files are written as `<output-name>_high` and `<output-name>_low` and the same value is used for the metadata title.
+  - `--author` (default: `AI_Characters`) sets the metadata author field.
+  - Automatically uses the `musubi-tuner` virtual environment.
+  - When two CUDA devices are available both trainings start concurrently, otherwise they run sequentially.
+
+### Example
+
+```bash
+bash vast_provision.sh
+# add your files under /workspace/musubi-tuner/dataset/
+./train_helper.py --dataset-config dataset/dataset.toml --num-samples 1 --output-name mycharacter --author "Your Name"
+```
+
 ## 1. VastAI
 
 Launch an instance using the PyTorch (Vast) template on https://cloud.vast.ai (recommend using an H100)
