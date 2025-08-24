@@ -62,6 +62,16 @@ wait_for_free_gpu() {
   done
 }
 
+get_free_port() {
+  python3 - "$@" <<'PY'
+import socket
+s = socket.socket()
+s.bind(("127.0.0.1", 0))
+print(s.getsockname()[1])
+s.close()
+PY
+}
+
 main() {
   if ! command -v nvidia-smi >/dev/null 2>&1; then
     echo "nvidia-smi is required but not found in PATH." >&2
@@ -111,10 +121,18 @@ main() {
     --dataset_config "$DATASET" \
     --t5 "$T5"
 
+  # Allocate distinct rendezvous ports to prevent EADDRINUSE
+  HIGH_PORT=$(get_free_port)
+  LOW_PORT=$(get_free_port)
+  if [[ "$LOW_PORT" == "$HIGH_PORT" ]]; then
+    LOW_PORT=$(get_free_port)
+  fi
+
   echo "Waiting for a free GPU for HIGH noise training..."
   HIGH_GPU=$(wait_for_free_gpu)
-  echo "Starting HIGH on GPU $HIGH_GPU -> run_high.log"
-  CUDA_VISIBLE_DEVICES="$HIGH_GPU" "$ACCELERATE" launch --num_cpu_threads_per_process 1 src/musubi_tuner/wan_train_network.py \
+  echo "Starting HIGH on GPU $HIGH_GPU (port $HIGH_PORT) -> run_high.log"
+  MASTER_ADDR=127.0.0.1 MASTER_PORT="$HIGH_PORT" CUDA_VISIBLE_DEVICES="$HIGH_GPU" \
+  "$ACCELERATE" launch --num_cpu_threads_per_process 1 --num_processes 1 --main_process_port "$HIGH_PORT" src/musubi_tuner/wan_train_network.py \
     --task t2v-A14B \
     --dit "$HIGH_DIT" \
     --vae "$VAE" \
@@ -153,8 +171,9 @@ main() {
 
   echo "Waiting for a free GPU for LOW noise training..."
   LOW_GPU=$(wait_for_free_gpu)
-  echo "Starting LOW on GPU $LOW_GPU -> run_low.log"
-  CUDA_VISIBLE_DEVICES="$LOW_GPU" "$ACCELERATE" launch --num_cpu_threads_per_process 1 src/musubi_tuner/wan_train_network.py \
+  echo "Starting LOW on GPU $LOW_GPU (port $LOW_PORT) -> run_low.log"
+  MASTER_ADDR=127.0.0.1 MASTER_PORT="$LOW_PORT" CUDA_VISIBLE_DEVICES="$LOW_GPU" \
+  "$ACCELERATE" launch --num_cpu_threads_per_process 1 --num_processes 1 --main_process_port "$LOW_PORT" src/musubi_tuner/wan_train_network.py \
     --task t2v-A14B \
     --dit "$LOW_DIT" \
     --vae "$VAE" \
