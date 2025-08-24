@@ -8,13 +8,27 @@
 This repository includes helpers to streamline setup and training on Vast.ai.
 
 - `vast_provision.sh` provisions a fresh instance, installs dependencies, downloads the required models, and pulls `train_helper.py` into `/workspace`.
-- `train_helper.py` caches latents and caption embeddings, writes a default `accelerate` config, and launches the high and low noise training runs.
-  - `--dataset-config` (default: `dataset/dataset.toml`) points to your dataset configuration.
-  - `--num-samples` (default: `1`) adjusts how often checkpoints are saved; the training scripts save every `100 / num_samples` epochs.
-  - `--output-name` (default: `my_wan_lora`) selects the base name for the LoRAs; files are written as `<output-name>_high` and `<output-name>_low` and the same value is used for the metadata title.
-  - `--author` (default: `AI_Characters`) sets the metadata author field.
-  - Automatically uses the `musubi-tuner` virtual environment.
-  - When two CUDA devices are available both trainings start concurrently, otherwise they run sequentially.
+- `run_wan_training.sh` Simple interactive training runner.
+
+### Simple runner (recommended)
+
+Use the new `run_wan_training.sh` for a minimal, interactive flow that:
+- caches latents and text encodings
+- trains HIGH noise and LOW noise
+- waits for a free GPU for each job, running both concurrently if 2+ GPUs are free
+
+```bash
+# on the Vast instance
+cd /workspace/musubi-tuner
+source venv/bin/activate
+cd /workspace
+bash run_wan_training.sh
+```
+
+Prompts and defaults:
+- Title suffix: defaults to `mylora`. Final names become `WAN2.2-HighNoise_<suffix>` and `WAN2.2-LowNoise_<suffix>`.
+- Author: defaults to `authorName`.
+- Dataset path: defaults to `/workspace/musubi-tuner/dataset/dataset.toml`.
 
 ### Example
 
@@ -30,9 +44,9 @@ Launch an instance using the PyTorch (Vast) template on https://cloud.vast.ai (r
 
 Set up the environment:
 ```bash
+sudo apt-get update
 git clone --recursive https://github.com/kohya-ss/musubi-tuner.git
 cd musubi-tuner
-git checkout feature-wan-2-2
 git checkout d0a193061a23a51c90664282205d753605a641c1
 apt install -y libcudnn8=8.9.7.29-1+cuda12.2 libcudnn8-dev=8.9.7.29-1+cuda12.2 --allow-change-held-packages
 python3 -m venv venv

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Provisioning script for Vast.ai to setup musubi-tuner with parallel installs/downloads
+# Provisioning script for Vast.ai to setup musubi-tuner with correct install order and parallel model downloads
 set -euo pipefail
 
 # ---------- helpers ----------
@@ -17,7 +17,7 @@ wait_all() {
   fi
 }
 
-# ---------- clone first (sequential) ----------
+# ---------- prep (sequential) ----------
 cd /workspace
 if [[ ! -d musubi-tuner ]]; then
   git clone --recursive https://github.com/kohya-ss/musubi-tuner.git
@@ -26,95 +26,75 @@ cd musubi-tuner
 git fetch --all --tags --prune
 git checkout d0a193061a23a51c90664282205d753605a641c1
 
-# ---------- create dirs needed by downloads (sequential, cheap) ----------
+# directories for datasets and models
 mkdir -p models/text_encoders models/vae models/diffusion_models
 mkdir -p /workspace/musubi-tuner/dataset
 
-# ---------- venv + minimal tools (sequential to enable parallel later) ----------
-PYTHON_BIN="$(command -v python3 || command -v python)"
-"$PYTHON_BIN" -m venv venv
-# shellcheck disable=SC1091
-source venv/bin/activate
-python -m pip install -U pip wheel setuptools
-# Ensure huggingface-cli exists before kicking off parallel HF downloads
-python -m pip install -U huggingface_hub
+# fetch dataset config and training helper ahead of parallel tasks
+curl -fsSL "https://raw.githubusercontent.com/obsxrver/wan22-lora-training/main/dataset.toml" -o /workspace/musubi-tuner/dataset/dataset.toml
+curl -fsSL "https://raw.githubusercontent.com/obsxrver/wan22-lora-training/main/run_wan_training.sh" -o /workspace/run_wan_training.sh
+chmod +x /workspace/run_wan_training.sh
 
-# ---------- kick off parallel tasks ----------
-# 1) apt packages (runs independent of Python/HF tasks)
+# ensure huggingface-cli exists for downloads (system Python, outside venv)
+python3 -m pip install -U huggingface_hub
+
+# ---------- parallel tasks ----------
+# Task 1: Install dependencies in the exact order from README
 (
-  sudo apt-get update && \
+  set -euo pipefail
+  cd /workspace/musubi-tuner
+
+  sudo apt-get update
   sudo apt-get install -y \
     libcudnn8=8.9.7.29-1+cuda12.2 \
     libcudnn8-dev=8.9.7.29-1+cuda12.2 \
     --allow-change-held-packages
-) & pids+=($!)
 
-# 2) Python deps (split to leverage parallelism)
-(
-  # editable install of musubi-tuner
+  python3 -m venv venv
+  # shellcheck disable=SC1091
+  source venv/bin/activate
+
   pip install -e .
+  pip install protobuf
+  pip install six
+  pip install torch==2.7.0 torchvision==0.22.0 xformers==0.0.30 --index-url https://download.pytorch.org/whl/cu128
 ) & pids+=($!)
 
+# Task 2: Download all four models concurrently
 (
-  # light deps
-  pip install protobuf six accelerate
-) & pids+=($!)
+  set -euo pipefail
+  cd /workspace/musubi-tuner
 
-(
-  # big GPU deps
-  pip install \
-    torch==2.7.0 \
-    torchvision==0.22.0 \
-    xformers==0.0.30 \
-    --index-url https://download.pytorch.org/whl/cu128
-) & pids+=($!)
+  mkdir -p models/text_encoders models/vae models/diffusion_models
 
-# 3) Hugging Face model downloads (each in parallel)
-(
   huggingface-cli download \
     Wan-AI/Wan2.1-I2V-14B-720P \
     models_t5_umt5-xxl-enc-bf16.pth \
     --local-dir models/text_encoders \
-    --local-dir-use-symlinks False
-) & pids+=($!)
+    --local-dir-use-symlinks False &
 
-(
   huggingface-cli download \
     Comfy-Org/Wan_2.1_ComfyUI_repackaged \
     split_files/vae/wan_2.1_vae.safetensors \
     --local-dir models/vae \
-    --local-dir-use-symlinks False
-) & pids+=($!)
+    --local-dir-use-symlinks False &
 
-(
   huggingface-cli download \
     Comfy-Org/Wan_2.2_ComfyUI_Repackaged \
     split_files/diffusion_models/wan2.2_t2v_high_noise_14B_fp16.safetensors \
     --local-dir models/diffusion_models \
-    --local-dir-use-symlinks False
-) & pids+=($!)
+    --local-dir-use-symlinks False &
 
-(
   huggingface-cli download \
     Comfy-Org/Wan_2.2_ComfyUI_Repackaged \
     split_files/diffusion_models/wan2.2_t2v_low_noise_14B_fp16.safetensors \
     --local-dir models/diffusion_models \
-    --local-dir-use-symlinks False
+    --local-dir-use-symlinks False &
+
+  wait
 ) & pids+=($!)
 
-# 4) Config/helper file fetches (parallel)
-(
-  cd /workspace/musubi-tuner/dataset && \
-  curl -fsSL "https://raw.githubusercontent.com/obsxrver/wan22-lora-training/refs/heads/main/dataset.toml" -o dataset.toml
-) & pids+=($!)
-
-(
-  cd /workspace && \
-  curl -fsSL "https://raw.githubusercontent.com/obsxrver/wan22-lora-training/main/train_helper.py" -o train_helper.py && \
-  chmod +x train_helper.py
-) & pids+=($!)
-
-# ---------- wait for all parallel tasks ----------
+# ---------- wait for both tasks ----------
 wait_all
 
 echo "✅ Setup complete."
