@@ -1,7 +1,22 @@
-# WAN2.2 LoRa Training Workflow - AI_Characters
+# WAN2.2 LoRa Training Workflow and Quick Start
 ### [(Original Author: AI_Characters)](https://civitai.com/user/AI_Characters)
 *I did not make this guide. I am just archiving it from [(CivitAI}](https://civitai.com/articles/17740)* 
 
+## Quick Start
+
+### Launch via Vast.ai Template
+
+Use the pre-built template to skip manual setup. Click the template link, pick a machine (H100 recommended), add your captioned images and .txt captions under `/workspace/musubi-tuner/dataset/`, then run the simple runner:
+
+- Template: [Wan 2.2 LoRA Training Quickstart](https://cloud.vast.ai/?ref_id=208628&creator_id=208628&name=Wan%202.2%20LoRA%20Training%20Quickstart)
+
+```bash
+# on the instance
+cd /workspace/musubi-tuner
+source venv/bin/activate
+cd /workspace
+bash run_wan_training.sh
+```
 
 ## Automation Scripts
 
@@ -30,13 +45,9 @@ Prompts and defaults:
 - Author: defaults to `authorName`.
 - Dataset path: defaults to `/workspace/musubi-tuner/dataset/dataset.toml`.
 
-### Example
-
-```bash
-bash vast_provision.sh
-# add your files under /workspace/musubi-tuner/dataset/
-./train_helper.py --dataset-config dataset/dataset.toml --num-samples 1 --output-name mycharacter --author "Your Name"
-```
+## WAN2.2 LoRa Training Workflow - AI_Characters
+### [(Original Author: AI_Characters)](https://civitai.com/user/AI_Characters)
+*I did not make this guide. I am just archiving it from [(CivitAI}](https://civitai.com/articles/17740)* 
 
 ## 1. VastAI
 

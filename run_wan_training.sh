@@ -45,6 +45,7 @@ is_gpu_free() {
 }
 
 wait_for_free_gpu() {
+  local excluded="${1:-}"
   while true; do
     local all_idxs
     all_idxs=$(nvidia-smi --query-gpu=index --format=csv,noheader 2>/dev/null || true)
@@ -53,6 +54,10 @@ wait_for_free_gpu() {
       exit 1
     fi
     for idx in $all_idxs; do
+      # skip excluded ids (comma- or space-separated)
+      if [[ -n "$excluded" ]] && [[ ",$excluded," == *",$idx,"* ]]; then
+        continue
+      fi
       if is_gpu_free "$idx"; then
         echo "$idx"
         return 0
@@ -170,7 +175,7 @@ main() {
   HIGH_PID=$!
 
   echo "Waiting for a free GPU for LOW noise training..."
-  LOW_GPU=$(wait_for_free_gpu)
+  LOW_GPU=$(wait_for_free_gpu "$HIGH_GPU")
   echo "Starting LOW on GPU $LOW_GPU (port $LOW_PORT) -> run_low.log"
   MASTER_ADDR=127.0.0.1 MASTER_PORT="$LOW_PORT" CUDA_VISIBLE_DEVICES="$LOW_GPU" \
   "$ACCELERATE" launch --num_cpu_threads_per_process 1 --num_processes 1 --main_process_port "$LOW_PORT" src/musubi_tuner/wan_train_network.py \
