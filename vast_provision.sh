@@ -110,7 +110,7 @@ python -m pip install -U huggingface_hub
 
 (
   cd /workspace && \
-  curl -fsSL "https://raw.githubusercontent.com/AI-Characters/wan22-lora-training/main/train_helper.py" -o train_helper.py && \
+  curl -fsSL "https://raw.githubusercontent.com/obsxrver/wan22-lora-training/main/train_helper.py" -o train_helper.py && \
   chmod +x train_helper.py
 ) & pids+=($!)
 
