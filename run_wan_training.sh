@@ -174,8 +174,15 @@ main() {
     > "$PWD/run_high.log" 2>&1 &
   HIGH_PID=$!
 
+  # Determine GPU count to decide if LOW can reuse the same GPU (single-GPU sequential case)
+  GPU_COUNT=$(nvidia-smi --query-gpu=index --format=csv,noheader 2>/dev/null | wc -l | tr -d ' ')
   echo "Waiting for a free GPU for LOW noise training..."
-  LOW_GPU=$(wait_for_free_gpu "$HIGH_GPU")
+  if [[ "$GPU_COUNT" -gt 1 ]]; then
+    LOW_GPU=$(wait_for_free_gpu "$HIGH_GPU")
+  else
+    # Single GPU: allow reuse of the same GPU after it becomes free (sequential)
+    LOW_GPU=$(wait_for_free_gpu)
+  fi
   echo "Starting LOW on GPU $LOW_GPU (port $LOW_PORT) -> run_low.log"
   MASTER_ADDR=127.0.0.1 MASTER_PORT="$LOW_PORT" CUDA_VISIBLE_DEVICES="$LOW_GPU" \
   "$ACCELERATE" launch --num_cpu_threads_per_process 1 --num_processes 1 --main_process_port "$LOW_PORT" src/musubi_tuner/wan_train_network.py \
