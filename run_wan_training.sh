@@ -94,6 +94,9 @@ main() {
   read -r -p "Dataset path (default: $DEFAULT_DATASET): " DATASET || true
   DATASET=${DATASET:-$DEFAULT_DATASET}
 
+  read -r -p "Save every N epochs (default: 100): " SAVE_EVERY || true
+  SAVE_EVERY=${SAVE_EVERY:-100}
+
   HIGH_TITLE="WAN2.2-HighNoise_${TITLE_SUFFIX}"
   LOW_TITLE="WAN2.2-LowNoise_${TITLE_SUFFIX}"
 
@@ -102,6 +105,7 @@ main() {
   echo "  High title: $HIGH_TITLE"
   echo "  Low title:  $LOW_TITLE"
   echo "  Author:     $AUTHOR"
+  echo "  Save every: $SAVE_EVERY epochs"
 
   # Validate required files
   require "$PYTHON"
@@ -157,7 +161,7 @@ main() {
     --timestep_sampling shift \
     --discrete_flow_shift 1.0 \
     --max_train_epochs 100 \
-    --save_every_n_epochs 100 \
+    --save_every_n_epochs "$SAVE_EVERY" \
     --seed 5 \
     --optimizer_args weight_decay=0.1 \
     --max_grad_norm 0 \
@@ -205,7 +209,7 @@ main() {
     --timestep_sampling shift \
     --discrete_flow_shift 1.0 \
     --max_train_epochs 100 \
-    --save_every_n_epochs 100 \
+    --save_every_n_epochs "$SAVE_EVERY" \
     --seed 5 \
     --optimizer_args weight_decay=0.1 \
     --max_grad_norm 0 \
