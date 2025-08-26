@@ -10,9 +10,6 @@ Use the pre-built template to skip manual setup. Click the template link, pick a
 
 ```bash
 # on the instance
-cd /workspace/musubi-tuner
-source venv/bin/activate
-cd /workspace
 bash run_wan_training.sh
 ```
 
