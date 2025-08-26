@@ -1,6 +1,6 @@
 # WAN2.2 LoRa Training Workflow and Quick Start
 ### [(Original Author: AI_Characters)](https://civitai.com/user/AI_Characters)
-*I did not make this guide. I am just archiving it from [(CivitAI}](https://civitai.com/articles/17740)* 
+*I did not make this guide. I am just archiving it from [(CivitAI)](https://civitai.com/articles/17740)* 
 
 ## Quick Start
 
