@@ -10,7 +10,7 @@ Use the pre-built template to skip manual setup. Click the template link, pick a
 
 ```bash
 # on the instance
-bash run_wan_training.sh
+./run_wan_training.sh
 ```
 
 ## Automation Scripts
