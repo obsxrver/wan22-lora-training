@@ -13,3 +13,11 @@ image_directory = "/workspace/musubi-tuner/dataset"
 cache_directory = "/workspace/musubi-tuner/dataset/cache"
 num_repeats = 1 # optional, default is 1. Number of times to repeat the dataset. Useful to balance the multiple datasets with different sizes.
 # other datasets can be added here. each dataset can have different configurations
+
+[[datasets]]
+video_directory = "/workspace/musubi-tuner/dataset"
+cache_directory = "/workspace/musubi-tuner/dataset/videocache"
+frame_extraction = "full" #start from the beginning of the video
+max_frames = 81 #only take 5 seconds 
+resolution = [298,298] # 0.088 megapixels, slightly higher than most guides recommend
+#340x340 took too long, this takes half as long and gave spectacular result. If you still struggle to produce good outputs, make sure all your videos are 16fps, only use high quality source material, and make sure your captions are consistent. 
