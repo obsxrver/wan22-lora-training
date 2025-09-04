@@ -176,7 +176,7 @@ main() {
   HIGH_GPU=$(wait_for_free_gpu)
   echo "Starting HIGH on GPU $HIGH_GPU (port $HIGH_PORT) -> run_high.log"
   MASTER_ADDR=127.0.0.1 MASTER_PORT="$HIGH_PORT" CUDA_VISIBLE_DEVICES="$HIGH_GPU" \
-  "$ACCELERATE" launch --num_cpu_threads_per_process 32 --num_processes 1 --main_process_port "$HIGH_PORT" src/musubi_tuner/wan_train_network.py \
+  "$ACCELERATE" launch --num_cpu_threads_per_process 8 --num_processes 1 --main_process_port "$HIGH_PORT" src/musubi_tuner/wan_train_network.py \
     --task t2v-A14B \
     --dit "$HIGH_DIT" \
     --vae "$VAE" \
@@ -189,7 +189,7 @@ main() {
     --learning_rate 3e-4 \
     --gradient_checkpointing \
     --gradient_accumulation_steps 1 \
-    --max_data_loader_n_workers 24 \
+    --max_data_loader_n_workers 4 \
     --network_module networks.lora_wan \
     --network_dim 16 \
     --network_alpha 16 \
@@ -224,7 +224,7 @@ main() {
   fi
   echo "Starting LOW on GPU $LOW_GPU (port $LOW_PORT) -> run_low.log"
   MASTER_ADDR=127.0.0.1 MASTER_PORT="$LOW_PORT" CUDA_VISIBLE_DEVICES="$LOW_GPU" \
-  "$ACCELERATE" launch --num_cpu_threads_per_process 32 --num_processes 1 --main_process_port "$LOW_PORT" src/musubi_tuner/wan_train_network.py \
+  "$ACCELERATE" launch --num_cpu_threads_per_process 8 --num_processes 1 --main_process_port "$LOW_PORT" src/musubi_tuner/wan_train_network.py \
     --task t2v-A14B \
     --dit "$LOW_DIT" \
     --vae "$VAE" \
@@ -237,7 +237,7 @@ main() {
     --learning_rate 3e-4 \
     --gradient_checkpointing \
     --gradient_accumulation_steps 1 \
-    --max_data_loader_n_workers 24 \
+    --max_data_loader_n_workers 4 \
     --network_module networks.lora_wan \
     --network_dim 16 \
     --network_alpha 16 \
