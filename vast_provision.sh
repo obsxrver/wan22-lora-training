@@ -39,7 +39,11 @@ chmod +x /workspace/run_wan_training.sh
 python3 -m pip install -U huggingface_hub
 
 # install vastai CLI for instance management and cloud storage
-python3 -m pip install -U vastai
+# Handle system package conflicts gracefully
+python3 -m pip install -U vastai --break-system-packages || {
+  echo "Warning: vastai installation had conflicts, trying alternative approach..."
+  python3 -m pip install vastai --user --break-system-packages
+}
 
 # ---------- parallel tasks ----------
 # Task 1: Install dependencies in the exact order from README

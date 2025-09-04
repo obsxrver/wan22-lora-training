@@ -115,6 +115,7 @@ get_cpu_threads() {
 check_cloud_configured() {
   # Check if Vast.ai cloud connections are configured
   if ! command -v vastai >/dev/null 2>&1; then
+    echo "vastai CLI not found. Try: pip install vastai --user --break-system-packages" >&2
     return 1
   fi
   
@@ -405,9 +406,10 @@ main() {
     UPLOAD_CLOUD=${UPLOAD_CLOUD:-n}
   else
     echo "No cloud connections configured. To set up:"
-    echo "  1. Go to Vast.ai Console > Cloud Connections"
-    echo "  2. Add a connection to Google Drive, AWS S3, or other cloud provider"
-    echo "  3. Follow the authentication steps"
+    echo "  1. Install vastai CLI if missing: pip install vastai --user --break-system-packages"
+    echo "  2. Go to Vast.ai Console > Cloud Connections"
+    echo "  3. Add a connection to Google Drive, AWS S3, or other cloud provider"
+    echo "  4. Follow the authentication steps"
   fi
   
   # Check for instance shutdown option
