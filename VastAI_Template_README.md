@@ -39,6 +39,8 @@ What it does:
 - Picks any free GPU; if 2+ are free, runs both trainings concurrently
 - Writes logs to `run_high.log` and `run_low.log`
 - Saves outputs to `/workspace/musubi-tuner/output/`
+- Optionally uploads LoRAs to cloud storage (Google Drive, AWS S3, etc.)
+- Optionally shuts down the instance to save costs
 
 Notes:
 - No manual `accelerate config` required; defaults are created automatically if missing.
@@ -53,8 +55,26 @@ Notes:
   ```
 - If no GPUs appear, ensure your selected machine has NVIDIA GPUs and `nvidia-smi` works in the container.
 
+## Post-Training Options
+
+After training completes, the script will prompt you for:
+
+### Cloud Storage Upload
+- **Requirements**: Cloud connection configured in Vast.ai Console
+- **Setup** (one-time):
+  1. Go to [Vast.ai Console > Cloud Connections](https://cloud.vast.ai/connections)
+  2. Add a connection to Google Drive, AWS S3, or other cloud provider
+  3. Follow the authentication steps in the console
+- **Result**: LoRAs uploaded to `loras/WAN/[lora_name]/` in your connected cloud storage
+
+### Auto-Shutdown
+- **Requirements**: Running on Vast.ai instance
+- **Result**: Instance stops automatically to save costs
+- **Safety**: 10-second countdown with option to cancel
+
 ## Where results go
 
 - Trained LoRA files and metadata are under `/workspace/musubi-tuner/output/`.
+- If uploaded to cloud storage: `loras/WAN/[lora_name]/` in your connected cloud provider
 
 updated 20250824

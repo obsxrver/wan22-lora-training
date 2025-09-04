@@ -112,6 +112,90 @@ get_cpu_threads() {
   echo "$threads"
 }
 
+check_cloud_configured() {
+  # Check if Vast.ai cloud connections are configured
+  if ! command -v vastai >/dev/null 2>&1; then
+    return 1
+  fi
+  
+  # Check if there are any cloud connections
+  local connections
+  connections=$(vastai show connections 2>/dev/null | grep -v "^ID" | head -1)
+  if [[ -n "$connections" ]]; then
+    return 0
+  fi
+  return 1
+}
+
+setup_vast_api_key() {
+  # Set up Vast.ai API key for instance management
+  if [[ -z "${VAST_CONTAINERLABEL:-}" ]]; then
+    echo "Warning: VAST_CONTAINERLABEL not found. Cannot set up instance shutdown." >&2
+    return 1
+  fi
+  
+  if [[ ! -f ~/.vast_api_key ]]; then
+    echo "Setting up Vast.ai API key for instance management..."
+    cat ~/.ssh/authorized_keys | md5sum | awk '{print $1}' > /tmp/ssh_key_hv
+    echo -n "$VAST_CONTAINERLABEL" | md5sum | awk '{print $1}' > /tmp/instance_id_hv
+    head -c -1 -q /tmp/ssh_key_hv /tmp/instance_id_hv > ~/.vast_api_key
+    rm -f /tmp/ssh_key_hv /tmp/instance_id_hv
+  fi
+  return 0
+}
+
+upload_to_cloud() {
+  local lora_path="$1"
+  local lora_name="$2"
+  
+  if ! check_cloud_configured; then
+    echo "No cloud connections configured in Vast.ai. Skipping upload." >&2
+    return 1
+  fi
+  
+  # Get the first available cloud connection
+  local connection_id
+  connection_id=$(vastai show connections 2>/dev/null | grep -v "^ID" | head -1 | awk '{print $1}')
+  
+  if [[ -z "$connection_id" ]]; then
+    echo "No cloud connection ID found. Skipping upload." >&2
+    return 1
+  fi
+  
+  echo "Uploading $lora_name to cloud storage (connection: $connection_id)..."
+  
+  # Use vastai cloud copy to upload to cloud storage
+  # Format: vastai cloud copy <src> <dst> --instance <instance_id> --connection <connection_id> --transfer instance-to-cloud
+  if vastai cloud copy "$lora_path" "loras/WAN/$lora_name/" --instance "$VAST_CONTAINERLABEL" --connection "$connection_id" --transfer instance-to-cloud; then
+    echo "✅ Successfully uploaded $lora_name to cloud storage"
+    return 0
+  else
+    echo "❌ Failed to upload $lora_name to cloud storage" >&2
+    return 1
+  fi
+}
+
+shutdown_instance() {
+  if [[ -z "${VAST_CONTAINERLABEL:-}" ]]; then
+    echo "Warning: VAST_CONTAINERLABEL not found. Cannot shutdown instance." >&2
+    return 1
+  fi
+  
+  if ! command -v vastai >/dev/null 2>&1; then
+    echo "Warning: vastai CLI not found. Cannot shutdown instance." >&2
+    return 1
+  fi
+  
+  echo "Shutting down Vast.ai instance $VAST_CONTAINERLABEL..."
+  if vastai stop instance "$VAST_CONTAINERLABEL"; then
+    echo "✅ Instance shutdown initiated"
+    return 0
+  else
+    echo "❌ Failed to shutdown instance" >&2
+    return 1
+  fi
+}
+
 calculate_cpu_params() {
   local threads
   threads=$(get_cpu_threads)
@@ -181,8 +265,19 @@ main() {
 
   # Calculate CPU parameters
   CPU_PARAMS=($(calculate_cpu_params))
-  CPU_THREADS_PER_PROCESS=${CPU_PARAMS[0]}
-  MAX_DATA_LOADER_WORKERS=${CPU_PARAMS[1]}
+  DEFAULT_CPU_THREADS_PER_PROCESS=${CPU_PARAMS[0]}
+  DEFAULT_MAX_DATA_LOADER_WORKERS=${CPU_PARAMS[1]}
+  
+  echo ""
+  read -r -p "CPU threads per process (default: $DEFAULT_CPU_THREADS_PER_PROCESS): " CPU_THREADS_PER_PROCESS || true
+  CPU_THREADS_PER_PROCESS=${CPU_THREADS_PER_PROCESS:-$DEFAULT_CPU_THREADS_PER_PROCESS}
+  
+  read -r -p "Max data loader workers (default: $DEFAULT_MAX_DATA_LOADER_WORKERS): " MAX_DATA_LOADER_WORKERS || true
+  MAX_DATA_LOADER_WORKERS=${MAX_DATA_LOADER_WORKERS:-$DEFAULT_MAX_DATA_LOADER_WORKERS}
+  
+  echo "Using CPU parameters:"
+  echo "  --num_cpu_threads_per_process: $CPU_THREADS_PER_PROCESS"
+  echo "  --max_data_loader_n_workers: $MAX_DATA_LOADER_WORKERS"
 
   echo "Caching latents..."
   "$PYTHON" src/musubi_tuner/wan_cache_latents.py \
@@ -296,6 +391,70 @@ main() {
   echo "Waiting for both trainings to finish..."
   wait "$HIGH_PID"
   wait "$LOW_PID"
+  echo "✅ Training completed!"
+  
+  # Post-training options
+  echo ""
+  echo "=== Post-Training Options ==="
+  
+  # Check for cloud storage upload option
+  UPLOAD_CLOUD="n"
+  if check_cloud_configured; then
+    echo "Cloud storage is configured in Vast.ai."
+    read -r -p "Upload LoRAs to cloud storage (loras/WAN/)? [y/N]: " UPLOAD_CLOUD || true
+    UPLOAD_CLOUD=${UPLOAD_CLOUD:-n}
+  else
+    echo "No cloud connections configured. To set up:"
+    echo "  1. Go to Vast.ai Console > Cloud Connections"
+    echo "  2. Add a connection to Google Drive, AWS S3, or other cloud provider"
+    echo "  3. Follow the authentication steps"
+  fi
+  
+  # Check for instance shutdown option
+  SHUTDOWN_INSTANCE="n"
+  if [[ -n "${VAST_CONTAINERLABEL:-}" ]] && command -v vastai >/dev/null 2>&1; then
+    echo "Vast.ai instance management available."
+    read -r -p "Shut down this instance to save costs? [y/N]: " SHUTDOWN_INSTANCE || true
+    SHUTDOWN_INSTANCE=${SHUTDOWN_INSTANCE:-n}
+  else
+    echo "Vast.ai CLI not available or not running on Vast.ai instance."
+  fi
+  
+  # Execute post-training actions
+  if [[ "$UPLOAD_CLOUD" =~ ^[Yy]$ ]]; then
+    echo ""
+    echo "=== Uploading to Cloud Storage ==="
+    
+    # Find and upload LoRA files
+    OUTPUT_DIR="$MUSUBI_DIR/output"
+    if [[ -d "$OUTPUT_DIR" ]]; then
+      # Upload high noise LoRA
+      if find "$OUTPUT_DIR" -name "${HIGH_TITLE}*" -type f | head -1 | read -r high_file; then
+        upload_to_cloud "$high_file" "$HIGH_TITLE" || echo "Failed to upload high noise LoRA"
+      else
+        echo "No high noise LoRA file found"
+      fi
+      
+      # Upload low noise LoRA
+      if find "$OUTPUT_DIR" -name "${LOW_TITLE}*" -type f | head -1 | read -r low_file; then
+        upload_to_cloud "$low_file" "$LOW_TITLE" || echo "Failed to upload low noise LoRA"
+      else
+        echo "No low noise LoRA file found"
+      fi
+    else
+      echo "Output directory not found: $OUTPUT_DIR"
+    fi
+  fi
+  
+  if [[ "$SHUTDOWN_INSTANCE" =~ ^[Yy]$ ]]; then
+    echo ""
+    echo "=== Shutting Down Instance ==="
+    setup_vast_api_key
+    echo "Instance will shut down in 10 seconds. Press Ctrl+C to cancel."
+    sleep 10
+    shutdown_instance
+  fi
+  
   echo "✅ All done."
 }
 

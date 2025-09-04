@@ -38,6 +38,9 @@ chmod +x /workspace/run_wan_training.sh
 # ensure huggingface-cli exists for downloads (system Python, outside venv)
 python3 -m pip install -U huggingface_hub
 
+# install vastai CLI for instance management and cloud storage
+python3 -m pip install -U vastai
+
 # ---------- parallel tasks ----------
 # Task 1: Install dependencies in the exact order from README
 (
