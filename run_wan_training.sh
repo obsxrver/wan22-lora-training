@@ -77,6 +77,34 @@ s.close()
 PY
 }
 
+check_low_vram() {
+  # Get VRAM in MB for first GPU (assuming all GPUs are identical)
+  local vram_mb
+  vram_mb=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -1 | tr -d ' ')
+  if [[ -z "$vram_mb" || ! "$vram_mb" =~ ^[0-9]+$ ]]; then
+    echo "Warning: Could not detect GPU VRAM, defaulting to xformers" >&2
+    return 1
+  fi
+  
+  # Convert to GB (33GB = 33792MB approximately)
+  local vram_gb=$((vram_mb / 1024))
+  echo "Detected GPU VRAM: ${vram_gb}GB" >&2
+  
+  if [[ "$vram_gb" -lt 33 ]]; then
+    return 0  # Low VRAM
+  else
+    return 1  # High VRAM
+  fi
+}
+
+determine_attention_flags() {
+  if check_low_vram; then
+    echo "--sdpa --blocks_to_swap 10"
+  else
+    echo "--xformers"
+  fi
+}
+
 main() {
   if ! command -v nvidia-smi >/dev/null 2>&1; then
     echo "nvidia-smi is required but not found in PATH." >&2
@@ -120,6 +148,13 @@ main() {
 
   ensure_accelerate_default
 
+  ATTN_FLAGS=$(determine_attention_flags)
+  echo "Using attention flags: $ATTN_FLAGS"
+
+ 
+  
+  
+
   echo "Caching latents..."
   "$PYTHON" src/musubi_tuner/wan_cache_latents.py \
     --dataset_config "$DATASET" \
@@ -141,20 +176,20 @@ main() {
   HIGH_GPU=$(wait_for_free_gpu)
   echo "Starting HIGH on GPU $HIGH_GPU (port $HIGH_PORT) -> run_high.log"
   MASTER_ADDR=127.0.0.1 MASTER_PORT="$HIGH_PORT" CUDA_VISIBLE_DEVICES="$HIGH_GPU" \
-  "$ACCELERATE" launch --num_cpu_threads_per_process 1 --num_processes 1 --main_process_port "$HIGH_PORT" src/musubi_tuner/wan_train_network.py \
+  "$ACCELERATE" launch --num_cpu_threads_per_process 32 --num_processes 1 --main_process_port "$HIGH_PORT" src/musubi_tuner/wan_train_network.py \
     --task t2v-A14B \
     --dit "$HIGH_DIT" \
     --vae "$VAE" \
     --t5 "$T5" \
     --dataset_config "$DATASET" \
-    --xformers \
+    $ATTN_FLAGS \
     --mixed_precision fp16 \
     --fp8_base \
     --optimizer_type adamw \
     --learning_rate 3e-4 \
     --gradient_checkpointing \
     --gradient_accumulation_steps 1 \
-    --max_data_loader_n_workers 2 \
+    --max_data_loader_n_workers 24 \
     --network_module networks.lora_wan \
     --network_dim 16 \
     --network_alpha 16 \
@@ -189,20 +224,20 @@ main() {
   fi
   echo "Starting LOW on GPU $LOW_GPU (port $LOW_PORT) -> run_low.log"
   MASTER_ADDR=127.0.0.1 MASTER_PORT="$LOW_PORT" CUDA_VISIBLE_DEVICES="$LOW_GPU" \
-  "$ACCELERATE" launch --num_cpu_threads_per_process 1 --num_processes 1 --main_process_port "$LOW_PORT" src/musubi_tuner/wan_train_network.py \
+  "$ACCELERATE" launch --num_cpu_threads_per_process 32 --num_processes 1 --main_process_port "$LOW_PORT" src/musubi_tuner/wan_train_network.py \
     --task t2v-A14B \
     --dit "$LOW_DIT" \
     --vae "$VAE" \
     --t5 "$T5" \
     --dataset_config "$DATASET" \
-    --xformers \
+    $ATTN_FLAGS \
     --mixed_precision fp16 \
     --fp8_base \
     --optimizer_type adamw \
     --learning_rate 3e-4 \
     --gradient_checkpointing \
     --gradient_accumulation_steps 1 \
-    --max_data_loader_n_workers 2 \
+    --max_data_loader_n_workers 24 \
     --network_module networks.lora_wan \
     --network_dim 16 \
     --network_alpha 16 \

@@ -24,7 +24,7 @@ if [[ ! -d musubi-tuner ]]; then
 fi
 cd musubi-tuner
 git fetch --all --tags --prune
-git checkout d0a193061a23a51c90664282205d753605a641c1
+#git checkout d0a193061a23a51c90664282205d753605a641c1
 
 # directories for datasets and models
 mkdir -p models/text_encoders models/vae models/diffusion_models
@@ -45,10 +45,11 @@ python3 -m pip install -U huggingface_hub
   cd /workspace/musubi-tuner
 
   sudo apt-get update
-  sudo apt-get install -y \
-    libcudnn8=8.9.7.29-1+cuda12.2 \
-    libcudnn8-dev=8.9.7.29-1+cuda12.2 \
-    --allow-change-held-packages
+  #sudo apt-get install -y \
+  ##  libcudnn8=8.9.7.29-1+cuda12.2 \
+    #libcudnn8-dev=8.9.7.29-1+cuda12.2 \
+    #--allow-change-held-packages
+  #above should already be installecd on the image. 
 
   python3 -m venv venv
   # shellcheck disable=SC1091
@@ -57,7 +58,7 @@ python3 -m pip install -U huggingface_hub
   pip install -e .
   pip install protobuf
   pip install six
-  pip install torch==2.7.0 torchvision==0.22.0 xformers==0.0.30 --index-url https://download.pytorch.org/whl/cu128
+  pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cu128
 ) & pids+=($!)
 
 # Task 2: Download all four models concurrently
