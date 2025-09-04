@@ -241,12 +241,53 @@ main() {
   HIGH_TITLE="WAN2.2-HighNoise_${TITLE_SUFFIX}"
   LOW_TITLE="WAN2.2-LowNoise_${TITLE_SUFFIX}"
 
-  echo "Using:"
+  echo ""
+  echo "=== Post-Training Options ==="
+  
+  # Check for cloud storage upload option
+  UPLOAD_CLOUD="n"
+  if check_cloud_configured; then
+    echo "Cloud storage is configured in Vast.ai."
+    read -r -p "Upload LoRAs to cloud storage after training? [y/N]: " UPLOAD_CLOUD || true
+    UPLOAD_CLOUD=${UPLOAD_CLOUD:-n}
+  else
+    echo "No cloud connections configured. To set up:"
+    echo "  1. Install vastai CLI if missing: pip install vastai --user --break-system-packages"
+    echo "  2. Go to Vast.ai Console > Cloud Connections"
+    echo "  3. Add a connection to Google Drive, AWS S3, or other cloud provider"
+    echo "  4. Follow the authentication steps"
+    read -r -p "Upload LoRAs to cloud storage after training? [y/N]: " UPLOAD_CLOUD || true
+    UPLOAD_CLOUD=${UPLOAD_CLOUD:-n}
+  fi
+  
+  # Check for instance shutdown option
+  SHUTDOWN_INSTANCE="n"
+  if [[ -n "${VAST_CONTAINERLABEL:-}" ]] && command -v vastai >/dev/null 2>&1; then
+    echo "Vast.ai instance management available."
+    read -r -p "Shut down this instance after training to save costs? [y/N]: " SHUTDOWN_INSTANCE || true
+    SHUTDOWN_INSTANCE=${SHUTDOWN_INSTANCE:-n}
+  else
+    echo "Vast.ai CLI not available or not running on Vast.ai instance."
+    read -r -p "Shut down this instance after training to save costs? [y/N]: " SHUTDOWN_INSTANCE || true
+    SHUTDOWN_INSTANCE=${SHUTDOWN_INSTANCE:-n}
+  fi
+
+  echo ""
+  echo "=== Configuration Summary ==="
   echo "  Dataset: $DATASET"
   echo "  High title: $HIGH_TITLE"
   echo "  Low title:  $LOW_TITLE"
   echo "  Author:     $AUTHOR"
   echo "  Save every: $SAVE_EVERY epochs"
+  echo "  Upload to cloud: $UPLOAD_CLOUD"
+  echo "  Auto-shutdown: $SHUTDOWN_INSTANCE"
+  echo ""
+  read -r -p "Proceed with training? [Y/n]: " PROCEED || true
+  PROCEED=${PROCEED:-Y}
+  if [[ ! "$PROCEED" =~ ^[Yy]?$ ]]; then
+    echo "Training cancelled."
+    exit 0
+  fi
 
   # Validate required files
   require "$PYTHON"
@@ -394,35 +435,7 @@ main() {
   wait "$LOW_PID"
   echo "✅ Training completed!"
   
-  # Post-training options
-  echo ""
-  echo "=== Post-Training Options ==="
-  
-  # Check for cloud storage upload option
-  UPLOAD_CLOUD="n"
-  if check_cloud_configured; then
-    echo "Cloud storage is configured in Vast.ai."
-    read -r -p "Upload LoRAs to cloud storage (loras/WAN/)? [y/N]: " UPLOAD_CLOUD || true
-    UPLOAD_CLOUD=${UPLOAD_CLOUD:-n}
-  else
-    echo "No cloud connections configured. To set up:"
-    echo "  1. Install vastai CLI if missing: pip install vastai --user --break-system-packages"
-    echo "  2. Go to Vast.ai Console > Cloud Connections"
-    echo "  3. Add a connection to Google Drive, AWS S3, or other cloud provider"
-    echo "  4. Follow the authentication steps"
-  fi
-  
-  # Check for instance shutdown option
-  SHUTDOWN_INSTANCE="n"
-  if [[ -n "${VAST_CONTAINERLABEL:-}" ]] && command -v vastai >/dev/null 2>&1; then
-    echo "Vast.ai instance management available."
-    read -r -p "Shut down this instance to save costs? [y/N]: " SHUTDOWN_INSTANCE || true
-    SHUTDOWN_INSTANCE=${SHUTDOWN_INSTANCE:-n}
-  else
-    echo "Vast.ai CLI not available or not running on Vast.ai instance."
-  fi
-  
-  # Execute post-training actions
+  # Execute pre-configured post-training actions
   if [[ "$UPLOAD_CLOUD" =~ ^[Yy]$ ]]; then
     echo ""
     echo "=== Uploading to Cloud Storage ==="
@@ -451,10 +464,13 @@ main() {
   if [[ "$SHUTDOWN_INSTANCE" =~ ^[Yy]$ ]]; then
     echo ""
     echo "=== Shutting Down Instance ==="
-    setup_vast_api_key
-    echo "Instance will shut down in 10 seconds. Press Ctrl+C to cancel."
-    sleep 10
-    shutdown_instance
+    if setup_vast_api_key; then
+      echo "Instance will shut down in 10 seconds. Press Ctrl+C to cancel."
+      sleep 10
+      shutdown_instance
+    else
+      echo "Could not set up instance shutdown. Skipping auto-shutdown."
+    fi
   fi
   
   echo "✅ All done."
