@@ -105,6 +105,34 @@ determine_attention_flags() {
   fi
 }
 
+get_cpu_threads() {
+  # Get the number of CPU threads available
+  local threads
+  threads=$(nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo 2>/dev/null || echo "8")
+  echo "$threads"
+}
+
+calculate_cpu_params() {
+  local threads
+  threads=$(get_cpu_threads)
+  local cpu_threads_per_process=$((threads / 4))
+  local max_data_loader_workers=$((threads / 8))
+  
+  # Ensure minimum values
+  if [[ "$cpu_threads_per_process" -lt 1 ]]; then
+    cpu_threads_per_process=1
+  fi
+  if [[ "$max_data_loader_workers" -lt 1 ]]; then
+    max_data_loader_workers=1
+  fi
+  
+  echo "Detected $threads CPU threads" >&2
+  echo "Setting --num_cpu_threads_per_process=$cpu_threads_per_process" >&2
+  echo "Setting --max_data_loader_n_workers=$max_data_loader_workers" >&2
+  
+  echo "$cpu_threads_per_process $max_data_loader_workers"
+}
+
 main() {
   if ! command -v nvidia-smi >/dev/null 2>&1; then
     echo "nvidia-smi is required but not found in PATH." >&2
@@ -151,9 +179,10 @@ main() {
   ATTN_FLAGS=$(determine_attention_flags)
   echo "Using attention flags: $ATTN_FLAGS"
 
- 
-  
-  
+  # Calculate CPU parameters
+  CPU_PARAMS=($(calculate_cpu_params))
+  CPU_THREADS_PER_PROCESS=${CPU_PARAMS[0]}
+  MAX_DATA_LOADER_WORKERS=${CPU_PARAMS[1]}
 
   echo "Caching latents..."
   "$PYTHON" src/musubi_tuner/wan_cache_latents.py \
@@ -176,7 +205,7 @@ main() {
   HIGH_GPU=$(wait_for_free_gpu)
   echo "Starting HIGH on GPU $HIGH_GPU (port $HIGH_PORT) -> run_high.log"
   MASTER_ADDR=127.0.0.1 MASTER_PORT="$HIGH_PORT" CUDA_VISIBLE_DEVICES="$HIGH_GPU" \
-  "$ACCELERATE" launch --num_cpu_threads_per_process 8 --num_processes 1 --main_process_port "$HIGH_PORT" src/musubi_tuner/wan_train_network.py \
+  "$ACCELERATE" launch --num_cpu_threads_per_process "$CPU_THREADS_PER_PROCESS" --num_processes 1 --main_process_port "$HIGH_PORT" src/musubi_tuner/wan_train_network.py \
     --task t2v-A14B \
     --dit "$HIGH_DIT" \
     --vae "$VAE" \
@@ -189,7 +218,7 @@ main() {
     --learning_rate 3e-4 \
     --gradient_checkpointing \
     --gradient_accumulation_steps 1 \
-    --max_data_loader_n_workers 4 \
+    --max_data_loader_n_workers "$MAX_DATA_LOADER_WORKERS" \
     --network_module networks.lora_wan \
     --network_dim 16 \
     --network_alpha 16 \
@@ -224,7 +253,7 @@ main() {
   fi
   echo "Starting LOW on GPU $LOW_GPU (port $LOW_PORT) -> run_low.log"
   MASTER_ADDR=127.0.0.1 MASTER_PORT="$LOW_PORT" CUDA_VISIBLE_DEVICES="$LOW_GPU" \
-  "$ACCELERATE" launch --num_cpu_threads_per_process 8 --num_processes 1 --main_process_port "$LOW_PORT" src/musubi_tuner/wan_train_network.py \
+  "$ACCELERATE" launch --num_cpu_threads_per_process "$CPU_THREADS_PER_PROCESS" --num_processes 1 --main_process_port "$LOW_PORT" src/musubi_tuner/wan_train_network.py \
     --task t2v-A14B \
     --dit "$LOW_DIT" \
     --vae "$VAE" \
@@ -237,7 +266,7 @@ main() {
     --learning_rate 3e-4 \
     --gradient_checkpointing \
     --gradient_accumulation_steps 1 \
-    --max_data_loader_n_workers 4 \
+    --max_data_loader_n_workers "$MAX_DATA_LOADER_WORKERS" \
     --network_module networks.lora_wan \
     --network_dim 16 \
     --network_alpha 16 \

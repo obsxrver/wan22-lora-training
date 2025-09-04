@@ -58,7 +58,7 @@ python3 -m pip install -U huggingface_hub
   pip install -e .
   pip install protobuf
   pip install six
-  pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cu128
+  pip install torch==2.8.0 torchvision xformers --index-url https://download.pytorch.org/whl/cu128
 ) & pids+=($!)
 
 # Task 2: Download all four models concurrently
