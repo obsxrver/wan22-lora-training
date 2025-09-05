@@ -440,22 +440,14 @@ main() {
     echo ""
     echo "=== Uploading to Cloud Storage ==="
     
-    # Find and upload LoRA files
     OUTPUT_DIR="$MUSUBI_DIR/output"
     if [[ -d "$OUTPUT_DIR" ]]; then
-      # Upload high noise LoRA
-      if find "$OUTPUT_DIR" -name "${HIGH_TITLE}*" -type f | head -1 | read -r high_file; then
-        upload_to_cloud "$high_file" "$HIGH_TITLE" || echo "Failed to upload high noise LoRA"
-      else
-        echo "No high noise LoRA file found"
-      fi
+      # Rename output directory to include the title suffix
+      RENAMED_OUTPUT="$MUSUBI_DIR/output-${TITLE_SUFFIX}"
+      mv "$OUTPUT_DIR" "$RENAMED_OUTPUT"
       
-      # Upload low noise LoRA
-      if find "$OUTPUT_DIR" -name "${LOW_TITLE}*" -type f | head -1 | read -r low_file; then
-        upload_to_cloud "$low_file" "$LOW_TITLE" || echo "Failed to upload low noise LoRA"
-      else
-        echo "No low noise LoRA file found"
-      fi
+      # Upload the entire directory
+      upload_to_cloud "$RENAMED_OUTPUT" "${TITLE_SUFFIX}" || echo "Failed to upload output directory"
     else
       echo "Output directory not found: $OUTPUT_DIR"
     fi
