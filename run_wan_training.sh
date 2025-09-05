@@ -121,7 +121,7 @@ check_cloud_configured() {
   
   # Check if there are any cloud connections
   local connections
-  connections=$(vastai show connections 2>/dev/null | grep -v "^ID" | head -1)
+  connections=$(vastai show connections 2>/dev/null | grep -v "^ID" | grep -v "^https://" | head -1)
   if [[ -n "$connections" ]]; then
     return 0
   fi
@@ -130,19 +130,21 @@ check_cloud_configured() {
 
 setup_vast_api_key() {
   # Set up Vast.ai API key for instance management
-  if [[ -z "${VAST_CONTAINERLABEL:-}" ]]; then
-    echo "Warning: VAST_CONTAINERLABEL not found. Cannot set up instance shutdown." >&2
+  if [[ -z "${CONTAINER_ID:-}" ]]; then
+    echo "Warning: CONTAINER_ID not found. Cannot set up instance shutdown." >&2
     return 1
   fi
   
-  if [[ ! -f ~/.vast_api_key ]]; then
-    echo "Setting up Vast.ai API key for instance management..."
-    cat ~/.ssh/authorized_keys | md5sum | awk '{print $1}' > /tmp/ssh_key_hv
-    echo -n "$VAST_CONTAINERLABEL" | md5sum | awk '{print $1}' > /tmp/instance_id_hv
-    head -c -1 -q /tmp/ssh_key_hv /tmp/instance_id_hv > ~/.vast_api_key
-    rm -f /tmp/ssh_key_hv /tmp/instance_id_hv
+  # Check if API key is already configured
+  if vastai show connections >/dev/null 2>&1; then
+    echo "Vast.ai API key already configured."
+    return 0
   fi
-  return 0
+  
+  echo "Setting up Vast.ai API key for instance management..."
+  echo "Please set your API key using: vastai set api-key YOUR_API_KEY"
+  echo "You can find your API key at: https://console.vast.ai/account/"
+  return 1
 }
 
 upload_to_cloud() {
@@ -156,18 +158,23 @@ upload_to_cloud() {
   
   # Get the first available cloud connection
   local connection_id
-  connection_id=$(vastai show connections 2>/dev/null | grep -v "^ID" | head -1 | awk '{print $1}')
+  connection_id=$(vastai show connections 2>/dev/null | grep -v "^ID" | grep -v "^https://" | head -1 | awk '{print $1}')
   
   if [[ -z "$connection_id" ]]; then
     echo "No cloud connection ID found. Skipping upload." >&2
     return 1
   fi
   
+  if [[ -z "${CONTAINER_ID:-}" ]]; then
+    echo "Warning: CONTAINER_ID not found. Cannot upload to cloud." >&2
+    return 1
+  fi
+  
   echo "Uploading $lora_name to cloud storage (connection: $connection_id)..."
   
   # Use vastai cloud copy to upload to cloud storage
-  # Format: vastai cloud copy <src> <dst> --instance <instance_id> --connection <connection_id> --transfer instance-to-cloud
-  if vastai cloud copy "$lora_path" "loras/WAN/$lora_name/" --instance "$VAST_CONTAINERLABEL" --connection "$connection_id" --transfer instance-to-cloud; then
+  # Format: vastai cloud copy --src <src> --dst <dst> --instance <instance_id> --connection <connection_id> --transfer "Instance to Cloud"
+  if vastai cloud copy --src "$lora_path" --dst "/loras/WAN/$lora_name" --instance "$CONTAINER_ID" --connection "$connection_id" --transfer "Instance to Cloud"; then
     echo "✅ Successfully uploaded $lora_name to cloud storage"
     return 0
   else
@@ -177,8 +184,8 @@ upload_to_cloud() {
 }
 
 shutdown_instance() {
-  if [[ -z "${VAST_CONTAINERLABEL:-}" ]]; then
-    echo "Warning: VAST_CONTAINERLABEL not found. Cannot shutdown instance." >&2
+  if [[ -z "${CONTAINER_ID:-}" ]]; then
+    echo "Warning: CONTAINER_ID not found. Cannot shutdown instance." >&2
     return 1
   fi
   
@@ -187,8 +194,8 @@ shutdown_instance() {
     return 1
   fi
   
-  echo "Shutting down Vast.ai instance $VAST_CONTAINERLABEL..."
-  if vastai stop instance "$VAST_CONTAINERLABEL"; then
+  echo "Shutting down Vast.ai instance $CONTAINER_ID..."
+  if vastai stop instance "$CONTAINER_ID"; then
     echo "✅ Instance shutdown initiated"
     return 0
   else
@@ -262,7 +269,7 @@ main() {
   
   # Check for instance shutdown option
   SHUTDOWN_INSTANCE="n"
-  if [[ -n "${VAST_CONTAINERLABEL:-}" ]] && command -v vastai >/dev/null 2>&1; then
+  if [[ -n "${CONTAINER_ID:-}" ]] && command -v vastai >/dev/null 2>&1; then
     echo "Vast.ai instance management available."
     read -r -p "Shut down this instance after training to save costs? [y/N]: " SHUTDOWN_INSTANCE || true
     SHUTDOWN_INSTANCE=${SHUTDOWN_INSTANCE:-n}

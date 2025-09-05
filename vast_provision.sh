@@ -45,6 +45,15 @@ python3 -m pip install -U vastai --break-system-packages || {
   python3 -m pip install vastai --user --break-system-packages
 }
 
+# Set up vastai API key if CONTAINER_API_KEY is available
+if [[ -n "${CONTAINER_API_KEY:-}" ]]; then
+  echo "Setting up Vast.ai API key..."
+  vastai set api-key "$CONTAINER_API_KEY" || echo "Warning: Failed to set vastai API key"
+else
+  echo "No CONTAINER_API_KEY found. You'll need to set the API key manually:"
+  echo "  vastai set api-key YOUR_API_KEY"
+fi
+
 # ---------- parallel tasks ----------
 # Task 1: Install dependencies in the exact order from README
 (
