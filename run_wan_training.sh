@@ -112,6 +112,47 @@ get_cpu_threads() {
   echo "$threads"
 }
 
+prompt_for_valid_api_key() {
+  echo ""
+  echo "Your Vast.ai API key is invalid or expired."
+  echo "To get a valid API key with full permissions:"
+  echo "  1. Go to https://cloud.vast.ai/manage-keys/"
+  echo "  2. Create a new API key"
+  echo "  3. Enter it below"
+  echo ""
+  
+  while true; do
+    read -r -p "Enter your Vast.ai API key (or 'skip' to continue without cloud features): " api_key
+    
+    if [[ "$api_key" == "skip" ]]; then
+      echo "Skipping API key setup. Cloud features will be disabled."
+      return 1
+    fi
+    
+    if [[ -z "$api_key" ]]; then
+      echo "Please enter a valid API key or 'skip'."
+      continue
+    fi
+    
+    # Set the API key
+    if vastai set api-key "$api_key"; then
+      # Test if it works
+      local output
+      output=$(vastai show connections 2>&1)
+      
+      if echo "$output" | grep -q "failed with error 401: Authentication required"; then
+        echo "API key is still invalid. Please try again."
+        continue
+      else
+        echo "✅ API key set successfully!"
+        return 0
+      fi
+    else
+      echo "Failed to set API key. Please try again."
+    fi
+  done
+}
+
 check_cloud_configured() {
   # Check if Vast.ai cloud connections are configured
   if ! command -v vastai >/dev/null 2>&1; then
@@ -119,9 +160,20 @@ check_cloud_configured() {
     return 1
   fi
   
-  # Check if there are any cloud connections
+  # Check if API key is valid by testing vastai show connections
+  local output
+  output=$(vastai show connections 2>&1)
+  
+  # Check for authentication error (401)
+  if echo "$output" | grep -q "failed with error 401: Authentication required"; then
+    echo "Current API key is invalid or expired." >&2
+    prompt_for_valid_api_key
+    return $?
+  fi
+  
+  # Check if there are any cloud connections (skip header and URL lines)
   local connections
-  connections=$(vastai show connections 2>/dev/null | grep -v "^ID" | grep -v "^https://" | head -1)
+  connections=$(echo "$output" | grep -v "^ID" | grep -v "^https://" | head -1)
   if [[ -n "$connections" ]]; then
     return 0
   fi
@@ -135,16 +187,18 @@ setup_vast_api_key() {
     return 1
   fi
   
-  # Check if API key is already configured
-  if vastai show connections >/dev/null 2>&1; then
-    echo "Vast.ai API key already configured."
+  # Check if API key is valid
+  local output
+  output=$(vastai show connections 2>&1)
+  
+  if echo "$output" | grep -q "failed with error 401: Authentication required"; then
+    echo "Current API key is invalid for instance management."
+    prompt_for_valid_api_key
+    return $?
+  else
+    echo "Vast.ai API key is valid for instance management."
     return 0
   fi
-  
-  echo "Setting up Vast.ai API key for instance management..."
-  echo "Please set your API key using: vastai set api-key YOUR_API_KEY"
-  echo "You can find your API key at: https://console.vast.ai/account/"
-  return 1
 }
 
 upload_to_cloud() {
