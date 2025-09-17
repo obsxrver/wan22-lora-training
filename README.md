@@ -4,7 +4,7 @@
 
 ### Launch via Vast.ai Template
 
-Use the pre-built template to skip manual setup. Click the template link, pick a machine (2 x H100 recommended for concurrent high + low model training), add your captioned images and .txt captions under `/workspace/musubi-tuner/dataset/`, then run the simple runner:
+Use the pre-built template to skip manual setup. Click the template link, pick a machine (2 x RTX 5090 recommended for concurrent high + low model training), add your captioned images and .txt captions under `/workspace/musubi-tuner/dataset/`, then run the simple runner:
 
 - Template: [Wan 2.2 LoRA Training Quickstart](https://cloud.vast.ai/?ref_id=208628&creator_id=208628&name=Wan%202.2%20LoRA%20Training%20Quickstart)
 
