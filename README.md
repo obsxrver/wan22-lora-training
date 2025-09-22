@@ -1,5 +1,7 @@
 # WAN2.2 LoRa Training Workflow and Quick Start
 
+### Looking for help with captioning? Auto-caption in under a minute with [https://obsxrver.pro/SillyCaption](https://obsxrver.pro/SillyCaption)
+
 ## Quick Start
 
 ### Launch via Vast.ai Template
