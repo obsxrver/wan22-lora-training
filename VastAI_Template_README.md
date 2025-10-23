@@ -39,7 +39,11 @@ What it does:
 - Picks any free GPU; if 2+ are free, runs both trainings concurrently
 - Writes logs to `run_high.log` and `run_low.log`
 - Saves outputs to `/workspace/musubi-tuner/output/`
-- Optionally uploads LoRAs to cloud storage (Google Drive, AWS S3, etc.)
+- **Analyzes training logs** and generates:
+  - CSV files with step/loss data (`training_analysis/`)
+  - Matplotlib plot of loss curves (`training_analysis/training_loss_plot.png`)
+  - Summary statistics (`training_analysis/training_summary.txt`)
+- Optionally uploads LoRAs + analysis to cloud storage (Google Drive, AWS S3, etc.)
 - Optionally shuts down the instance to save costs
 
 Notes:
@@ -75,6 +79,24 @@ After training completes, the script will prompt you for:
 ## Where results go
 
 - Trained LoRA files and metadata are under `/workspace/musubi-tuner/output/`.
-- If uploaded to cloud storage: `loras/WAN/[lora_name]/` in your connected cloud provider
+- Training analysis (loss plots, CSVs, summary) are under `/workspace/training_analysis/`.
+- If uploaded to cloud storage: `loras/WAN/[lora_name]/` contains:
+  - LoRA `.safetensors` files
+  - Training logs (`run_high.log`, `run_low.log`)
+  - Analysis directory with plots and CSVs
+
+## Analyzing existing logs
+
+If you have training logs from a previous run:
+
+```bash
+python3 /workspace/analyze_training_logs.py /path/to/log/directory
+```
+
+This will create a `training_analysis/` directory with:
+- `high_noise_loss.csv` - Step and loss data for high noise
+- `low_noise_loss.csv` - Step and loss data for low noise  
+- `training_loss_plot.png` - Visual comparison of both training runs
+- `training_summary.txt` - Statistics (min, max, mean loss, etc.)
 
 updated 20250824

@@ -33,7 +33,9 @@ mkdir -p /workspace/musubi-tuner/dataset
 # fetch dataset config and training helper ahead of parallel tasks
 curl -fsSL "https://raw.githubusercontent.com/obsxrver/wan22-lora-training/main/dataset.toml" -o /workspace/musubi-tuner/dataset/dataset.toml
 curl -fsSL "https://raw.githubusercontent.com/obsxrver/wan22-lora-training/main/run_wan_training.sh" -o /workspace/run_wan_training.sh
+curl -fsSL "https://raw.githubusercontent.com/obsxrver/wan22-lora-training/main/analyze_training_logs.py" -o /workspace/analyze_training_logs.py
 chmod +x /workspace/run_wan_training.sh
+chmod +x /workspace/analyze_training_logs.py
 
 # ensure huggingface-cli exists for downloads (system Python, outside venv)
 python3 -m pip install -U huggingface_hub
@@ -77,6 +79,7 @@ fi
   pip install -e .
   pip install protobuf
   pip install six
+  pip install matplotlib
   pip install torch==2.8.0 torchvision xformers --index-url https://download.pytorch.org/whl/cu128
 ) & pids+=($!)
 

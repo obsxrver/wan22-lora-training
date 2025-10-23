@@ -86,7 +86,6 @@ check_low_vram() {
     return 1
   fi
   
-  # Convert to GB (33GB = 33792MB approximately)
   local vram_gb=$((vram_mb / 1024))
   echo "Detected GPU VRAM: ${vram_gb}GB" >&2
   
@@ -96,17 +95,16 @@ check_low_vram() {
     return 1  # High VRAM
   fi
 }
-
+# block swap on anything 32GB or less VRAM
 determine_attention_flags() {
   if check_low_vram; then
     echo "--sdpa --blocks_to_swap 10"
   else
-    echo "--xformers"
+    echo "--sdpa"
   fi
 }
 
 get_cpu_threads() {
-  # Get the number of CPU threads available
   local threads
   threads=$(nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo 2>/dev/null || echo "8")
   echo "$threads"
@@ -495,23 +493,33 @@ main() {
   wait "$HIGH_PID"
   wait "$LOW_PID"
   echo "✅ Training completed!"
+
+  OUTPUT_DIR="$MUSUBI_DIR/output"
+  RENAMED_OUTPUT="$MUSUBI_DIR/output-${TITLE_SUFFIX}"
+  if [[ -d "$OUTPUT_DIR" ]]; then
+    mv "$OUTPUT_DIR" "$RENAMED_OUTPUT"
+  fi
+  
+  # Analyze training logs and generate plots
+  echo ""
+  echo "=== Analyzing Training Logs ==="
+  if [[ -f "$PWD/run_high.log" || -f "$PWD/run_low.log" ]]; then
+    python /workspace/analyze_training_logs.py "$PWD" || echo "Warning: Log analysis failed"
+    if [[ -d "$PWD/training_analysis" ]]; then
+      mv "$PWD/training_analysis" "$RENAMED_OUTPUT/training_analysis"
+    fi
+
+    [[ -f "$PWD/run_high.log" ]] && cp "$PWD/run_high.log" "$RENAMED_OUTPUT/"
+    [[ -f "$PWD/run_low.log" ]] && cp "$PWD/run_low.log" "$RENAMED_OUTPUT/"
+  else
+    echo "Warning: No log files found to analyze"
+  fi
   
   # Execute pre-configured post-training actions
   if [[ "$UPLOAD_CLOUD" =~ ^[Yy]$ ]]; then
     echo ""
     echo "=== Uploading to Cloud Storage ==="
-    
-    OUTPUT_DIR="$MUSUBI_DIR/output"
-    if [[ -d "$OUTPUT_DIR" ]]; then
-      # Rename output directory to include the title suffix
-      RENAMED_OUTPUT="$MUSUBI_DIR/output-${TITLE_SUFFIX}"
-      mv "$OUTPUT_DIR" "$RENAMED_OUTPUT"
-      
-      # Upload the entire directory
-      upload_to_cloud "$RENAMED_OUTPUT" "${TITLE_SUFFIX}" || echo "Failed to upload output directory"
-    else
-      echo "Output directory not found: $OUTPUT_DIR"
-    fi
+    upload_to_cloud "$RENAMED_OUTPUT" "${TITLE_SUFFIX}" || echo "Failed to upload output directory"
   fi
   
   if [[ "$SHUTDOWN_INSTANCE" =~ ^[Yy]$ ]]; then

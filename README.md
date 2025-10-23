@@ -40,6 +40,14 @@ Prompts and defaults:
 - Author: defaults to `authorName`.
 - Dataset path: defaults to `/workspace/musubi-tuner/dataset/dataset.toml`.
 
+After training completes, the script automatically:
+- Analyzes training logs and generates loss curves
+- Creates CSV files with step/loss data
+- Generates a matplotlib visualization
+- Saves analysis to `training_analysis/` directory
+- Optionally uploads everything to cloud storage (if configured)
+- Optionally shuts down the instance to save costs
+
 ## WAN2.2 LoRa Training Workflow - AI_Characters
 *I did not make this guide. I am just archiving it from [(CivitAI)](https://civitai.com/articles/17740)* [(Original Author: AI_Characters)](https://civitai.com/user/AI_Characters)
 
