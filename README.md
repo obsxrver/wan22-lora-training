@@ -1,10 +1,12 @@
 # WAN2.2 LoRa Training Workflow and Quick Start
 
+### Looking for help with captioning? Auto-caption in under a minute with [https://obsxrver.pro/SillyCaption](https://obsxrver.pro/SillyCaption)
+
 ## Quick Start
 
 ### Launch via Vast.ai Template
 
-Use the pre-built template to skip manual setup. Click the template link, pick a machine (2 x H100 recommended for concurrent high + low model training), add your captioned images and .txt captions under `/workspace/musubi-tuner/dataset/`, then run the simple runner:
+Use the pre-built template to skip manual setup. Click the template link, pick a machine (2 x RTX 5090 recommended for concurrent high + low model training), add your captioned images and .txt captions under `/workspace/musubi-tuner/dataset/`, then run the simple runner:
 
 - Template: [Wan 2.2 LoRA Training Quickstart](https://cloud.vast.ai/?ref_id=208628&creator_id=208628&name=Wan%202.2%20LoRA%20Training%20Quickstart)
 
@@ -127,6 +129,8 @@ python src/musubi_tuner/wan_cache_text_encoder_outputs.py --dataset_config /work
 
 Run `accelerate config` once before training (select "no" for all options).
 
+If training on an RTX 5090, you need to swap out `--xformers` for `--sdpa` (Blackwell has compat. issues with xformers), and add `--blocks_to_swap 10` (or you will OOM)
+
 ### High-noise training command:
 
 ```bash
@@ -158,9 +162,9 @@ accelerate launch --num_cpu_threads_per_process 1 src/musubi_tuner/wan_train_net
 --lr_scheduler_power 8 \
 --lr_scheduler_min_lr_ratio="5e-5" \
 --output_dir /workspace/musubi-tuner/output \
---output_name WAN2.2-HighNoise_SmartphoneSnapshotPhotoReality_v3_by-AI_Characters \
---metadata_title WAN2.2-HighNoise_SmartphoneSnapshotPhotoReality_v3_by-AI_Characters \
---metadata_author AI_Characters \
+--output_name WAN2.2-HighNoise_MyLoRA \
+--metadata_title WAN2.2-HighNoise_MyLoRA \
+--metadata_author MyName \
 --preserve_distribution_shape \
 --min_timestep 875 \
 --max_timestep 1000
@@ -197,9 +201,9 @@ accelerate launch --num_cpu_threads_per_process 1 src/musubi_tuner/wan_train_net
 --lr_scheduler_power 8 \
 --lr_scheduler_min_lr_ratio="5e-5" \
 --output_dir /workspace/musubi-tuner/output \
---output_name WAN2.2-LowNoise_SmartphoneSnapshotPhotoReality_v3_by-AI_Characters \
---metadata_title WAN2.2-LowNoise_SmartphoneSnapshotPhotoReality_v3_by-AI_Characters \
---metadata_author AI_Characters \
+--output_name WAN2.2-LowNoise_MyLoRA \
+--metadata_title WAN2.2-LowNoise_MyLoRA \
+--metadata_author MyName \
 --preserve_distribution_shape \
 --min_timestep 0 \
 --max_timestep 875

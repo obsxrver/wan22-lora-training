@@ -294,41 +294,58 @@ main() {
   read -r -p "Dataset path (default: $DEFAULT_DATASET): " DATASET || true
   DATASET=${DATASET:-$DEFAULT_DATASET}
 
+  if [[ ! -f "$DATASET" ]]; then
+    echo "Dataset config not found at $DATASET; downloading..."
+    mkdir -p "$(dirname "$DATASET")"
+    curl -fsSL "https://raw.githubusercontent.com/obsxrver/wan22-lora-training/main/dataset.toml" -o "$DATASET" || echo "Failed to download dataset.toml" >&2
+  fi
+
   read -r -p "Save every N epochs (default: 100): " SAVE_EVERY || true
   SAVE_EVERY=${SAVE_EVERY:-100}
+
+  CPU_PARAMS=($(calculate_cpu_params))
+  DEFAULT_CPU_THREADS_PER_PROCESS=${CPU_PARAMS[0]}
+  DEFAULT_MAX_DATA_LOADER_WORKERS=${CPU_PARAMS[1]}
+
+  echo ""
+  read -r -p "CPU threads per process (default: $DEFAULT_CPU_THREADS_PER_PROCESS): " CPU_THREADS_PER_PROCESS || true
+  CPU_THREADS_PER_PROCESS=${CPU_THREADS_PER_PROCESS:-$DEFAULT_CPU_THREADS_PER_PROCESS}
+
+  read -r -p "Max data loader workers (default: $DEFAULT_MAX_DATA_LOADER_WORKERS): " MAX_DATA_LOADER_WORKERS || true
+  MAX_DATA_LOADER_WORKERS=${MAX_DATA_LOADER_WORKERS:-$DEFAULT_MAX_DATA_LOADER_WORKERS}
 
   HIGH_TITLE="WAN2.2-HighNoise_${TITLE_SUFFIX}"
   LOW_TITLE="WAN2.2-LowNoise_${TITLE_SUFFIX}"
 
   echo ""
   echo "=== Post-Training Options ==="
-  
+
   # Check for cloud storage upload option
-  UPLOAD_CLOUD="n"
+  UPLOAD_CLOUD="Y"
   if check_cloud_configured; then
     echo "Cloud storage is configured in Vast.ai."
-    read -r -p "Upload LoRAs to cloud storage after training? [y/N]: " UPLOAD_CLOUD || true
-    UPLOAD_CLOUD=${UPLOAD_CLOUD:-n}
+    read -r -p "Upload LoRAs to cloud storage after training? [Y/n]: " UPLOAD_CLOUD || true
+    UPLOAD_CLOUD=${UPLOAD_CLOUD:-Y}
   else
     echo "No cloud connections configured. To set up:"
     echo "  1. Install vastai CLI if missing: pip install vastai --user --break-system-packages"
     echo "  2. Go to Vast.ai Console > Cloud Connections"
     echo "  3. Add a connection to Google Drive, AWS S3, or other cloud provider"
     echo "  4. Follow the authentication steps"
-    read -r -p "Upload LoRAs to cloud storage after training? [y/N]: " UPLOAD_CLOUD || true
-    UPLOAD_CLOUD=${UPLOAD_CLOUD:-n}
+    read -r -p "Upload LoRAs to cloud storage after training? [Y/n]: " UPLOAD_CLOUD || true
+    UPLOAD_CLOUD=${UPLOAD_CLOUD:-Y}
   fi
-  
+
   # Check for instance shutdown option
-  SHUTDOWN_INSTANCE="n"
+  SHUTDOWN_INSTANCE="Y"
   if [[ -n "${CONTAINER_ID:-}" ]] && command -v vastai >/dev/null 2>&1; then
     echo "Vast.ai instance management available."
-    read -r -p "Shut down this instance after training to save costs? [y/N]: " SHUTDOWN_INSTANCE || true
-    SHUTDOWN_INSTANCE=${SHUTDOWN_INSTANCE:-n}
+    read -r -p "Shut down this instance after training to save costs? [Y/n]: " SHUTDOWN_INSTANCE || true
+    SHUTDOWN_INSTANCE=${SHUTDOWN_INSTANCE:-Y}
   else
     echo "Vast.ai CLI not available or not running on Vast.ai instance."
-    read -r -p "Shut down this instance after training to save costs? [y/N]: " SHUTDOWN_INSTANCE || true
-    SHUTDOWN_INSTANCE=${SHUTDOWN_INSTANCE:-n}
+    read -r -p "Shut down this instance after training to save costs? [Y/n]: " SHUTDOWN_INSTANCE || true
+    SHUTDOWN_INSTANCE=${SHUTDOWN_INSTANCE:-Y}
   fi
 
   echo ""
@@ -364,18 +381,6 @@ main() {
   ATTN_FLAGS=$(determine_attention_flags)
   echo "Using attention flags: $ATTN_FLAGS"
 
-  # Calculate CPU parameters
-  CPU_PARAMS=($(calculate_cpu_params))
-  DEFAULT_CPU_THREADS_PER_PROCESS=${CPU_PARAMS[0]}
-  DEFAULT_MAX_DATA_LOADER_WORKERS=${CPU_PARAMS[1]}
-  
-  echo ""
-  read -r -p "CPU threads per process (default: $DEFAULT_CPU_THREADS_PER_PROCESS): " CPU_THREADS_PER_PROCESS || true
-  CPU_THREADS_PER_PROCESS=${CPU_THREADS_PER_PROCESS:-$DEFAULT_CPU_THREADS_PER_PROCESS}
-  
-  read -r -p "Max data loader workers (default: $DEFAULT_MAX_DATA_LOADER_WORKERS): " MAX_DATA_LOADER_WORKERS || true
-  MAX_DATA_LOADER_WORKERS=${MAX_DATA_LOADER_WORKERS:-$DEFAULT_MAX_DATA_LOADER_WORKERS}
-  
   echo "Using CPU parameters:"
   echo "  --num_cpu_threads_per_process: $CPU_THREADS_PER_PROCESS"
   echo "  --max_data_loader_n_workers: $MAX_DATA_LOADER_WORKERS"
