@@ -80,7 +80,6 @@ fi
   pip install protobuf
   pip install six
   pip install matplotlib
-  pip install torch==2.8.0 torchvision xformers --index-url https://download.pytorch.org/whl/cu128
 ) & pids+=($!)
 
 # Task 2: Download all four models concurrently
