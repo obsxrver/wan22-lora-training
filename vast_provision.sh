@@ -89,25 +89,25 @@ fi
 
   mkdir -p models/text_encoders models/vae models/diffusion_models
 
-  huggingface-cli download \
+  hf download \
     Wan-AI/Wan2.1-I2V-14B-720P \
     models_t5_umt5-xxl-enc-bf16.pth \
     --local-dir models/text_encoders \
     --local-dir-use-symlinks False &
 
-  huggingface-cli download \
+  hf download \
     Comfy-Org/Wan_2.1_ComfyUI_repackaged \
     split_files/vae/wan_2.1_vae.safetensors \
     --local-dir models/vae \
     --local-dir-use-symlinks False &
 
-  huggingface-cli download \
+  hf download \
     Comfy-Org/Wan_2.2_ComfyUI_Repackaged \
     split_files/diffusion_models/wan2.2_t2v_high_noise_14B_fp16.safetensors \
     --local-dir models/diffusion_models \
     --local-dir-use-symlinks False &
 
-  huggingface-cli download \
+  hf download \
     Comfy-Org/Wan_2.2_ComfyUI_Repackaged \
     split_files/diffusion_models/wan2.2_t2v_low_noise_14B_fp16.safetensors \
     --local-dir models/diffusion_models \
