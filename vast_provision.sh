@@ -38,7 +38,10 @@ chmod +x /workspace/run_wan_training.sh
 chmod +x /workspace/analyze_training_logs.py
 
 # ensure huggingface-cli exists for downloads (system Python, outside venv)
-python3 -m pip install -U huggingface_hub
+# Install latest version with system package handling
+python3 -m pip install -U "huggingface_hub>=0.20.0" --break-system-packages || \
+  python3 -m pip install -U huggingface_hub --break-system-packages || \
+  python3 -m pip install -U huggingface_hub
 
 # install vastai CLI for instance management and cloud storage
 # Handle system package conflicts gracefully
@@ -92,26 +95,22 @@ fi
   hf download \
     Wan-AI/Wan2.1-I2V-14B-720P \
     models_t5_umt5-xxl-enc-bf16.pth \
-    --local-dir models/text_encoders \
-    --local-dir-use-symlinks False &
+    --local-dir models/text_encoders &
 
   hf download \
     Comfy-Org/Wan_2.1_ComfyUI_repackaged \
     split_files/vae/wan_2.1_vae.safetensors \
-    --local-dir models/vae \
-    --local-dir-use-symlinks False &
+    --local-dir models/vae &
 
   hf download \
     Comfy-Org/Wan_2.2_ComfyUI_Repackaged \
     split_files/diffusion_models/wan2.2_t2v_high_noise_14B_fp16.safetensors \
-    --local-dir models/diffusion_models \
-    --local-dir-use-symlinks False &
+    --local-dir models/diffusion_models &
 
   hf download \
     Comfy-Org/Wan_2.2_ComfyUI_Repackaged \
     split_files/diffusion_models/wan2.2_t2v_low_noise_14B_fp16.safetensors \
-    --local-dir models/diffusion_models \
-    --local-dir-use-symlinks False &
+    --local-dir models/diffusion_models &
 
   wait
 ) & pids+=($!)
