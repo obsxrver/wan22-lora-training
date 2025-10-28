@@ -83,6 +83,7 @@ fi
   pip install protobuf
   pip install six
   pip install matplotlib
+  pip install torch torchvision
 ) & pids+=($!)
 
 # Task 2: Download all four models concurrently
