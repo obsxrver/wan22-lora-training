@@ -17,6 +17,107 @@ HIGH_DIT="$MUSUBI_DIR/models/diffusion_models/split_files/diffusion_models/wan2.
 LOW_DIT="$MUSUBI_DIR/models/diffusion_models/split_files/diffusion_models/wan2.2_t2v_low_noise_14B_fp16.safetensors"
 DEFAULT_DATASET="$MUSUBI_DIR/dataset/dataset.toml"
 
+# CLI overrides (populated via command line flags or environment variables)
+TITLE_SUFFIX_INPUT="${WAN_TITLE_SUFFIX:-}"
+AUTHOR_INPUT="${WAN_AUTHOR:-}"
+DATASET_INPUT="${WAN_DATASET_PATH:-}"
+SAVE_EVERY_INPUT="${WAN_SAVE_EVERY:-}"
+CPU_THREADS_INPUT="${WAN_CPU_THREADS_PER_PROCESS:-}"
+MAX_WORKERS_INPUT="${WAN_MAX_DATA_LOADER_WORKERS:-}"
+CLI_UPLOAD_CLOUD="${WAN_UPLOAD_CLOUD:-}"
+CLI_SHUTDOWN_INSTANCE="${WAN_SHUTDOWN_INSTANCE:-}"
+AUTO_CONFIRM=0
+
+print_usage() {
+  cat <<'EOF'
+Usage: run_wan_training.sh [options]
+
+Optional arguments (all fall back to interactive prompts when omitted):
+  --title-suffix VALUE             Set the title suffix for output names
+  --author VALUE                   Set the metadata author
+  --dataset PATH                   Path to dataset configuration toml
+  --save-every N                   Save every N epochs
+  --cpu-threads-per-process N      Number of CPU threads per process
+  --max-data-loader-workers N      Data loader workers
+  --upload-cloud [Y|N]             Upload outputs to configured cloud storage
+  --shutdown-instance [Y|N]        Shut down Vast.ai instance after training
+  --auto-confirm                   Skip the final confirmation prompt
+  --help                           Show this message and exit
+
+Environment variable overrides:
+  WAN_TITLE_SUFFIX, WAN_AUTHOR, WAN_DATASET_PATH, WAN_SAVE_EVERY,
+  WAN_CPU_THREADS_PER_PROCESS, WAN_MAX_DATA_LOADER_WORKERS,
+  WAN_UPLOAD_CLOUD, WAN_SHUTDOWN_INSTANCE
+EOF
+}
+
+normalize_yes_no() {
+  local value="$1"
+  value="${value:-}"
+  if [[ -z "$value" ]]; then
+    echo ""
+    return
+  fi
+  case "$value" in
+    [Yy]|[Yy][Ee][Ss]) echo "Y" ;;
+    [Nn]|[Nn][Oo]) echo "N" ;;
+    *) echo "$value" ;;
+  esac
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --title-suffix)
+      TITLE_SUFFIX_INPUT="$2"
+      shift 2
+      ;;
+    --author)
+      AUTHOR_INPUT="$2"
+      shift 2
+      ;;
+    --dataset)
+      DATASET_INPUT="$2"
+      shift 2
+      ;;
+    --save-every)
+      SAVE_EVERY_INPUT="$2"
+      shift 2
+      ;;
+    --cpu-threads-per-process)
+      CPU_THREADS_INPUT="$2"
+      shift 2
+      ;;
+    --max-data-loader-workers)
+      MAX_WORKERS_INPUT="$2"
+      shift 2
+      ;;
+    --upload-cloud)
+      CLI_UPLOAD_CLOUD="$2"
+      shift 2
+      ;;
+    --shutdown-instance)
+      CLI_SHUTDOWN_INSTANCE="$2"
+      shift 2
+      ;;
+    --auto-confirm)
+      AUTO_CONFIRM=1
+      shift 1
+      ;;
+    --help)
+      print_usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      echo "Use --help to see available arguments." >&2
+      exit 1
+      ;;
+  esac
+done
+
+CLI_UPLOAD_CLOUD=$(normalize_yes_no "$CLI_UPLOAD_CLOUD")
+CLI_SHUTDOWN_INSTANCE=$(normalize_yes_no "$CLI_SHUTDOWN_INSTANCE")
+
 require() {
   if [[ ! -f "$1" ]]; then
     echo "Missing required file: $1" >&2
@@ -285,13 +386,29 @@ main() {
 
   # Prompt inputs with defaults
   echo "WAN2.2 LoRA simple runner"
-  read -r -p "Title suffix (default: mylora): " TITLE_SUFFIX || true
+
+  if [[ -z "${TITLE_SUFFIX_INPUT:-}" ]]; then
+    read -r -p "Title suffix (default: mylora): " TITLE_SUFFIX || true
+  else
+    TITLE_SUFFIX="$TITLE_SUFFIX_INPUT"
+    echo "Title suffix (auto): $TITLE_SUFFIX"
+  fi
   TITLE_SUFFIX=${TITLE_SUFFIX:-mylora}
 
-  read -r -p "Author (default: authorName): " AUTHOR || true
+  if [[ -z "${AUTHOR_INPUT:-}" ]]; then
+    read -r -p "Author (default: authorName): " AUTHOR || true
+  else
+    AUTHOR="$AUTHOR_INPUT"
+    echo "Author (auto): $AUTHOR"
+  fi
   AUTHOR=${AUTHOR:-authorName}
 
-  read -r -p "Dataset path (default: $DEFAULT_DATASET): " DATASET || true
+  if [[ -z "${DATASET_INPUT:-}" ]]; then
+    read -r -p "Dataset path (default: $DEFAULT_DATASET): " DATASET || true
+  else
+    DATASET="$DATASET_INPUT"
+    echo "Dataset path (auto): $DATASET"
+  fi
   DATASET=${DATASET:-$DEFAULT_DATASET}
 
   if [[ ! -f "$DATASET" ]]; then
@@ -300,7 +417,12 @@ main() {
     curl -fsSL "https://raw.githubusercontent.com/obsxrver/wan22-lora-training/main/dataset.toml" -o "$DATASET" || echo "Failed to download dataset.toml" >&2
   fi
 
-  read -r -p "Save every N epochs (default: 100): " SAVE_EVERY || true
+  if [[ -z "${SAVE_EVERY_INPUT:-}" ]]; then
+    read -r -p "Save every N epochs (default: 100): " SAVE_EVERY || true
+  else
+    SAVE_EVERY="$SAVE_EVERY_INPUT"
+    echo "Save every N epochs (auto): $SAVE_EVERY"
+  fi
   SAVE_EVERY=${SAVE_EVERY:-100}
 
   CPU_PARAMS=($(calculate_cpu_params))
@@ -308,10 +430,20 @@ main() {
   DEFAULT_MAX_DATA_LOADER_WORKERS=${CPU_PARAMS[1]}
 
   echo ""
-  read -r -p "CPU threads per process (default: $DEFAULT_CPU_THREADS_PER_PROCESS): " CPU_THREADS_PER_PROCESS || true
+  if [[ -z "${CPU_THREADS_INPUT:-}" ]]; then
+    read -r -p "CPU threads per process (default: $DEFAULT_CPU_THREADS_PER_PROCESS): " CPU_THREADS_PER_PROCESS || true
+  else
+    CPU_THREADS_PER_PROCESS="$CPU_THREADS_INPUT"
+    echo "CPU threads per process (auto): $CPU_THREADS_PER_PROCESS"
+  fi
   CPU_THREADS_PER_PROCESS=${CPU_THREADS_PER_PROCESS:-$DEFAULT_CPU_THREADS_PER_PROCESS}
 
-  read -r -p "Max data loader workers (default: $DEFAULT_MAX_DATA_LOADER_WORKERS): " MAX_DATA_LOADER_WORKERS || true
+  if [[ -z "${MAX_WORKERS_INPUT:-}" ]]; then
+    read -r -p "Max data loader workers (default: $DEFAULT_MAX_DATA_LOADER_WORKERS): " MAX_DATA_LOADER_WORKERS || true
+  else
+    MAX_DATA_LOADER_WORKERS="$MAX_WORKERS_INPUT"
+    echo "Max data loader workers (auto): $MAX_DATA_LOADER_WORKERS"
+  fi
   MAX_DATA_LOADER_WORKERS=${MAX_DATA_LOADER_WORKERS:-$DEFAULT_MAX_DATA_LOADER_WORKERS}
 
   HIGH_TITLE="WAN2.2-HighNoise_${TITLE_SUFFIX}"
@@ -322,34 +454,46 @@ main() {
 
   # Check for cloud storage upload option
   UPLOAD_CLOUD="Y"
-  if check_cloud_configured; then
-    echo "Cloud storage is configured in Vast.ai."
-    read -r -p "Upload LoRAs to cloud storage after training? [Y/n]: " UPLOAD_CLOUD || true
-    UPLOAD_CLOUD=${UPLOAD_CLOUD:-Y}
+  if [[ -n "${CLI_UPLOAD_CLOUD:-}" ]]; then
+    UPLOAD_CLOUD="$CLI_UPLOAD_CLOUD"
+    echo "Upload LoRAs to cloud storage after training? [auto: $UPLOAD_CLOUD]"
   else
-    echo "No cloud connections configured. To set up:"
-    echo "  1. Install vastai CLI if missing: pip install vastai --user --break-system-packages"
-    echo "  2. Go to Vast.ai Console > Cloud Connections"
-    echo "  3. Add a connection to Google Drive, AWS S3, or other cloud provider"
-    echo "  4. Follow the authentication steps"
-    read -r -p "Upload LoRAs to cloud storage after training? [Y/n]: " UPLOAD_CLOUD || true
-    UPLOAD_CLOUD=${UPLOAD_CLOUD:-Y}
+    if check_cloud_configured; then
+      echo "Cloud storage is configured in Vast.ai."
+      read -r -p "Upload LoRAs to cloud storage after training? [Y/n]: " UPLOAD_CLOUD || true
+      UPLOAD_CLOUD=${UPLOAD_CLOUD:-Y}
+    else
+      echo "No cloud connections configured. To set up:"
+      echo "  1. Install vastai CLI if missing: pip install vastai --user --break-system-packages"
+      echo "  2. Go to Vast.ai Console > Cloud Connections"
+      echo "  3. Add a connection to Google Drive, AWS S3, or other cloud provider"
+      echo "  4. Follow the authentication steps"
+      read -r -p "Upload LoRAs to cloud storage after training? [Y/n]: " UPLOAD_CLOUD || true
+      UPLOAD_CLOUD=${UPLOAD_CLOUD:-Y}
+    fi
   fi
 
   # Check for instance shutdown option
   SHUTDOWN_INSTANCE="Y"
-  if [[ -n "${CONTAINER_ID:-}" ]] && command -v vastai >/dev/null 2>&1; then
-    echo "Vast.ai instance management available."
-    read -r -p "Shut down this instance after training to save costs? [Y/n]: " SHUTDOWN_INSTANCE || true
-    SHUTDOWN_INSTANCE=${SHUTDOWN_INSTANCE:-Y}
+  if [[ -n "${CLI_SHUTDOWN_INSTANCE:-}" ]]; then
+    SHUTDOWN_INSTANCE="$CLI_SHUTDOWN_INSTANCE"
+    echo "Shut down this instance after training? [auto: $SHUTDOWN_INSTANCE]"
   else
-    echo "Vast.ai CLI not available or not running on Vast.ai instance."
-    read -r -p "Shut down this instance after training to save costs? [Y/n]: " SHUTDOWN_INSTANCE || true
-    SHUTDOWN_INSTANCE=${SHUTDOWN_INSTANCE:-Y}
+    if [[ -n "${CONTAINER_ID:-}" ]] && command -v vastai >/dev/null 2>&1; then
+      echo "Vast.ai instance management available."
+      read -r -p "Shut down this instance after training to save costs? [Y/n]: " SHUTDOWN_INSTANCE || true
+      SHUTDOWN_INSTANCE=${SHUTDOWN_INSTANCE:-Y}
+    else
+      echo "Vast.ai CLI not available or not running on Vast.ai instance."
+      read -r -p "Shut down this instance after training to save costs? [Y/n]: " SHUTDOWN_INSTANCE || true
+      SHUTDOWN_INSTANCE=${SHUTDOWN_INSTANCE:-Y}
+    fi
   fi
 
   echo ""
   echo "=== Configuration Summary ==="
+  UPLOAD_CLOUD=$(normalize_yes_no "$UPLOAD_CLOUD")
+  SHUTDOWN_INSTANCE=$(normalize_yes_no "$SHUTDOWN_INSTANCE")
   echo "  Dataset: $DATASET"
   echo "  High title: $HIGH_TITLE"
   echo "  Low title:  $LOW_TITLE"
@@ -358,11 +502,16 @@ main() {
   echo "  Upload to cloud: $UPLOAD_CLOUD"
   echo "  Auto-shutdown: $SHUTDOWN_INSTANCE"
   echo ""
-  read -r -p "Proceed with training? [Y/n]: " PROCEED || true
-  PROCEED=${PROCEED:-Y}
-  if [[ ! "$PROCEED" =~ ^[Yy]?$ ]]; then
-    echo "Training cancelled."
-    exit 0
+  if (( AUTO_CONFIRM )); then
+    PROCEED="Y"
+    echo "Proceed with training? [auto: Y]"
+  else
+    read -r -p "Proceed with training? [Y/n]: " PROCEED || true
+    PROCEED=${PROCEED:-Y}
+    if [[ ! "$PROCEED" =~ ^[Yy]?$ ]]; then
+      echo "Training cancelled."
+      exit 0
+    fi
   fi
 
   # Validate required files

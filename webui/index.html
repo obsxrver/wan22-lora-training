@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>WAN 2.2 LoRA Training</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #121212;
+        --panel: #1f1f1f;
+        --accent: #8ab4f8;
+        --accent-strong: #a66bff;
+        --border: #2a2a2a;
+        --text: #f1f3f4;
+        --muted: #9aa0a6;
+      }
+
+      body {
+        font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        min-height: 100vh;
+      }
+
+      header {
+        padding: 2rem 1.5rem 1rem;
+        text-align: center;
+        background: linear-gradient(135deg, rgba(138, 180, 248, 0.25), rgba(166, 107, 255, 0.25));
+        border-bottom: 1px solid var(--border);
+      }
+
+      header h1 {
+        margin: 0 0 0.5rem;
+        font-size: 2rem;
+      }
+
+      header p {
+        margin: 0;
+        color: var(--muted);
+      }
+
+      main {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 1.5rem;
+        display: grid;
+        gap: 1.5rem;
+      }
+
+      section {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 1.5rem;
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.25);
+      }
+
+      h2 {
+        margin-top: 0;
+        font-size: 1.35rem;
+      }
+
+      #dropzone {
+        border: 2px dashed var(--accent);
+        border-radius: 16px;
+        padding: 2rem;
+        text-align: center;
+        transition: background 0.2s ease, border-color 0.2s ease;
+        cursor: pointer;
+        color: var(--muted);
+        font-size: 1rem;
+      }
+
+      #dropzone.active {
+        background: rgba(138, 180, 248, 0.12);
+        border-color: var(--accent-strong);
+        color: var(--text);
+      }
+
+      #upload-summary {
+        margin-top: 1rem;
+        font-size: 0.95rem;
+        color: var(--muted);
+      }
+
+      form {
+        display: grid;
+        gap: 1rem;
+      }
+
+      .form-row {
+        display: grid;
+        gap: 1rem;
+      }
+
+      .form-row.two-col {
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      }
+
+      label {
+        display: flex;
+        flex-direction: column;
+        font-weight: 600;
+        color: var(--muted);
+        gap: 0.4rem;
+      }
+
+      input[type="text"],
+      input[type="number"] {
+        padding: 0.6rem 0.75rem;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: rgba(255, 255, 255, 0.04);
+        color: var(--text);
+        font-size: 0.95rem;
+      }
+
+      input[type="checkbox"] {
+        width: 1.1rem;
+        height: 1.1rem;
+        accent-color: var(--accent);
+      }
+
+      .toggle {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        font-weight: 600;
+        color: var(--muted);
+      }
+
+      button {
+        border: none;
+        border-radius: 999px;
+        padding: 0.8rem 1.4rem;
+        font-size: 1rem;
+        font-weight: 600;
+        background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+        color: var(--text);
+        cursor: pointer;
+        transition: transform 0.15s ease, opacity 0.15s ease;
+      }
+
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      button:not(:disabled):hover {
+        transform: translateY(-1px);
+      }
+
+      #status-line {
+        font-size: 1rem;
+        font-weight: 600;
+        color: var(--accent);
+      }
+
+      #message {
+        color: var(--muted);
+        font-size: 0.95rem;
+        min-height: 1.2rem;
+      }
+
+      .metrics {
+        display: grid;
+        gap: 1rem;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      }
+
+      .metric-card {
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 1rem;
+        background: rgba(255, 255, 255, 0.03);
+      }
+
+      .metric-card h3 {
+        margin: 0 0 0.5rem;
+        font-size: 1.1rem;
+      }
+
+      .metric-card p {
+        margin: 0.2rem 0;
+        font-size: 0.95rem;
+        color: var(--muted);
+      }
+
+      canvas {
+        width: 100% !important;
+        max-height: 320px;
+      }
+
+      #logOutput {
+        background: rgba(0, 0, 0, 0.35);
+        border-radius: 12px;
+        border: 1px solid var(--border);
+        padding: 1rem;
+        max-height: 280px;
+        overflow-y: auto;
+        font-family: "JetBrains Mono", "Fira Code", monospace;
+        font-size: 0.85rem;
+        line-height: 1.45;
+        white-space: pre-wrap;
+      }
+
+      @media (max-width: 768px) {
+        header {
+          padding: 1.5rem 1rem 1rem;
+        }
+        main {
+          padding: 1rem;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>WAN 2.2 LoRA Training</h1>
+      <p>Upload your dataset, configure prompts, and launch training with live feedback.</p>
+    </header>
+    <main>
+      <section>
+        <h2>1. Upload dataset files</h2>
+        <div id="dropzone">
+          <strong>Drop images, videos, and caption files here</strong>
+          <div>or click to browse from your machine.</div>
+        </div>
+        <input id="fileInput" type="file" multiple hidden />
+        <div id="upload-summary">Files will be saved to /workspace/musubi-tuner/dataset/.</div>
+      </section>
+
+      <section>
+        <h2>2. Configure training</h2>
+        <div id="status-line">Status: <span id="status">Idle</span></div>
+        <div id="message"></div>
+        <form id="trainingForm">
+          <div class="form-row two-col">
+            <label>
+              Title suffix
+              <input type="text" name="titleSuffix" value="mylora" required />
+            </label>
+            <label>
+              Author
+              <input type="text" name="author" value="authorName" required />
+            </label>
+          </div>
+          <div class="form-row">
+            <label>
+              Dataset config path
+              <input type="text" name="datasetPath" value="/workspace/musubi-tuner/dataset/dataset.toml" required />
+            </label>
+          </div>
+          <div class="form-row two-col">
+            <label>
+              Save every N epochs
+              <input type="number" name="saveEvery" min="1" value="100" />
+            </label>
+            <label>
+              CPU threads per process (leave blank for auto)
+              <input type="number" name="cpuThreads" min="1" placeholder="Auto" />
+            </label>
+            <label>
+              Max data loader workers (leave blank for auto)
+              <input type="number" name="maxWorkers" min="1" placeholder="Auto" />
+            </label>
+          </div>
+          <div class="form-row two-col">
+            <label class="toggle">
+              <input type="checkbox" name="uploadCloud" checked />
+              Upload LoRAs to cloud storage after training
+            </label>
+            <label class="toggle">
+              <input type="checkbox" name="shutdownInstance" checked />
+              Shut down instance after training
+            </label>
+          </div>
+          <div class="form-row">
+            <button id="startButton" type="submit">Start training</button>
+          </div>
+        </form>
+      </section>
+
+      <section>
+        <h2>3. Live progress</h2>
+        <div class="metrics">
+          <div class="metric-card">
+            <h3>High noise</h3>
+            <p>Current step: <span id="highStep">-</span></p>
+            <p>Current loss: <span id="highLoss">-</span></p>
+          </div>
+          <div class="metric-card">
+            <h3>Low noise</h3>
+            <p>Current step: <span id="lowStep">-</span></p>
+            <p>Current loss: <span id="lowLoss">-</span></p>
+          </div>
+        </div>
+        <canvas id="lossChart"></canvas>
+      </section>
+
+      <section>
+        <h2>Training log</h2>
+        <pre id="logOutput">Waiting for training output…</pre>
+      </section>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" integrity="sha384-oXW5Hzkwmo7aX6ixkmKuuNHYsYAGdivgLPgAvFp8ZUBKbjsggq09uXBJgp7wa9u5" crossorigin="anonymous"></script>
+    <script>
+      const dropzone = document.getElementById('dropzone');
+      const fileInput = document.getElementById('fileInput');
+      const uploadSummary = document.getElementById('upload-summary');
+      const form = document.getElementById('trainingForm');
+      const statusEl = document.getElementById('status');
+      const messageEl = document.getElementById('message');
+      const startButton = document.getElementById('startButton');
+      const highStepEl = document.getElementById('highStep');
+      const highLossEl = document.getElementById('highLoss');
+      const lowStepEl = document.getElementById('lowStep');
+      const lowLossEl = document.getElementById('lowLoss');
+      const logOutput = document.getElementById('logOutput');
+
+      const MAX_LOG_LINES = 400;
+      const logLines = [];
+
+      let chart;
+      function initChart() {
+        const ctx = document.getElementById('lossChart').getContext('2d');
+        chart = new Chart(ctx, {
+          type: 'line',
+          data: {
+            datasets: [
+              {
+                label: 'High noise loss',
+                data: [],
+                borderColor: 'rgba(138, 180, 248, 0.95)',
+                backgroundColor: 'rgba(138, 180, 248, 0.15)',
+                tension: 0.2,
+                pointRadius: 0,
+                borderWidth: 2,
+              },
+              {
+                label: 'Low noise loss',
+                data: [],
+                borderColor: 'rgba(166, 107, 255, 0.95)',
+                backgroundColor: 'rgba(166, 107, 255, 0.15)',
+                tension: 0.2,
+                pointRadius: 0,
+                borderWidth: 2,
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            animation: false,
+            maintainAspectRatio: false,
+            scales: {
+              x: {
+                type: 'linear',
+                title: { display: true, text: 'Step' },
+                ticks: { color: '#bdc1c6' },
+                grid: { color: 'rgba(189, 193, 198, 0.1)' },
+              },
+              y: {
+                title: { display: true, text: 'Loss' },
+                ticks: { color: '#bdc1c6' },
+                grid: { color: 'rgba(189, 193, 198, 0.1)' },
+              },
+            },
+            plugins: {
+              legend: {
+                labels: {
+                  color: '#e8eaed',
+                },
+              },
+            },
+          },
+        });
+      }
+
+      initChart();
+
+      function resetChart() {
+        chart.data.datasets.forEach((dataset) => {
+          dataset.data = [];
+        });
+        chart.update('none');
+        highStepEl.textContent = '-';
+        highLossEl.textContent = '-';
+        lowStepEl.textContent = '-';
+        lowLossEl.textContent = '-';
+        logLines.length = 0;
+        logOutput.textContent = 'Waiting for training output…';
+      }
+
+      async function uploadFiles(fileList) {
+        if (!fileList || !fileList.length) {
+          return;
+        }
+        const formData = new FormData();
+        Array.from(fileList).forEach((file) => formData.append('files', file, file.name));
+        uploadSummary.textContent = 'Uploading ' + fileList.length + ' file(s)…';
+        try {
+          const response = await fetch('/upload', {
+            method: 'POST',
+            body: formData,
+          });
+          if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            throw new Error(error.detail || 'Upload failed');
+          }
+          const result = await response.json();
+          uploadSummary.textContent = `Uploaded ${result.count} file(s).`;
+        } catch (error) {
+          uploadSummary.textContent = error.message || 'Upload failed';
+        }
+      }
+
+      dropzone.addEventListener('click', () => fileInput.click());
+
+      dropzone.addEventListener('dragover', (event) => {
+        event.preventDefault();
+        dropzone.classList.add('active');
+      });
+
+      dropzone.addEventListener('dragleave', () => {
+        dropzone.classList.remove('active');
+      });
+
+      dropzone.addEventListener('drop', (event) => {
+        event.preventDefault();
+        dropzone.classList.remove('active');
+        if (event.dataTransfer?.files?.length) {
+          uploadFiles(event.dataTransfer.files);
+        }
+      });
+
+      fileInput.addEventListener('change', (event) => {
+        if (event.target.files?.length) {
+          uploadFiles(event.target.files);
+          fileInput.value = '';
+        }
+      });
+
+      function setStatus(text) {
+        statusEl.textContent = text;
+      }
+
+      function setMessage(text, isError = false) {
+        messageEl.textContent = text;
+        messageEl.style.color = isError ? '#ff8a80' : 'var(--muted)';
+      }
+
+      function updateLog(line) {
+        if (!line) {
+          return;
+        }
+        logLines.push(line);
+        if (logLines.length > MAX_LOG_LINES) {
+          logLines.splice(0, logLines.length - MAX_LOG_LINES);
+        }
+        logOutput.textContent = logLines.join('\n');
+        logOutput.scrollTop = logOutput.scrollHeight;
+      }
+
+      function applyHistory(datasetIndex, history) {
+        const dataset = chart.data.datasets[datasetIndex];
+        dataset.data = history
+          .map((point) => ({ x: Number(point.step), y: Number(point.loss) }))
+          .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
+      }
+
+      function updateMetric(run, point) {
+        const datasetIndex = run === 'high' ? 0 : 1;
+        const dataset = chart.data.datasets[datasetIndex];
+        if (!point) {
+          return;
+        }
+        const stepValue = Number(point.step);
+        const lossValue = Number(point.loss);
+        if (!Number.isFinite(stepValue) || !Number.isFinite(lossValue)) {
+          return;
+        }
+        if (dataset.data.length && dataset.data[dataset.data.length - 1].x === stepValue) {
+          dataset.data[dataset.data.length - 1].y = lossValue;
+        } else {
+          dataset.data.push({ x: stepValue, y: lossValue });
+        }
+        if (run === 'high') {
+          highStepEl.textContent = stepValue;
+          highLossEl.textContent = lossValue.toFixed(6);
+        } else {
+          lowStepEl.textContent = stepValue;
+          lowLossEl.textContent = lossValue.toFixed(6);
+        }
+        chart.update('none');
+      }
+
+      function applySnapshot(snapshot) {
+        setStatus(snapshot.status ? snapshot.status.charAt(0).toUpperCase() + snapshot.status.slice(1) : 'Idle');
+        startButton.disabled = !!snapshot.running;
+        applyHistory(0, snapshot.high?.history || []);
+        applyHistory(1, snapshot.low?.history || []);
+        const highCurrent = snapshot.high?.current;
+        const lowCurrent = snapshot.low?.current;
+        if (highCurrent) {
+          highStepEl.textContent = highCurrent.step;
+          highLossEl.textContent = Number(highCurrent.loss).toFixed(6);
+        }
+        if (lowCurrent) {
+          lowStepEl.textContent = lowCurrent.step;
+          lowLossEl.textContent = Number(lowCurrent.loss).toFixed(6);
+        }
+        chart.update('none');
+        logLines.length = 0;
+        (snapshot.logs || []).forEach((line) => logLines.push(line));
+        if (logLines.length) {
+          logOutput.textContent = logLines.join('\n');
+          logOutput.scrollTop = logOutput.scrollHeight;
+        } else {
+          logOutput.textContent = 'Waiting for training output…';
+        }
+      }
+
+      async function startTraining(event) {
+        event.preventDefault();
+        const formData = new FormData(form);
+        const payload = {
+          title_suffix: (formData.get('titleSuffix') || '').toString().trim() || 'mylora',
+          author: (formData.get('author') || '').toString().trim() || 'authorName',
+          dataset_path: (formData.get('datasetPath') || '').toString().trim(),
+          save_every: Number(formData.get('saveEvery')) || 100,
+          cpu_threads_per_process: formData.get('cpuThreads') ? Number(formData.get('cpuThreads')) : null,
+          max_data_loader_workers: formData.get('maxWorkers') ? Number(formData.get('maxWorkers')) : null,
+          upload_cloud: formData.get('uploadCloud') === 'on',
+          shutdown_instance: formData.get('shutdownInstance') === 'on',
+          auto_confirm: true,
+        };
+
+        if (!payload.dataset_path) {
+          setMessage('Dataset config path is required.', true);
+          return;
+        }
+
+        resetChart();
+        setMessage('Launching training…');
+        startButton.disabled = true;
+
+        try {
+          const response = await fetch('/train', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            throw new Error(error.detail || 'Failed to start training');
+          }
+          setMessage('Training started. Watching logs…');
+        } catch (error) {
+          startButton.disabled = false;
+          setMessage(error.message || 'Failed to start training', true);
+        }
+      }
+
+      form.addEventListener('submit', startTraining);
+
+      function handleEvent(event) {
+        const data = event.data ? JSON.parse(event.data) : null;
+        if (!data) return;
+        switch (data.type) {
+          case 'snapshot':
+            applySnapshot(data);
+            break;
+          case 'status':
+            setStatus(data.status ? data.status.charAt(0).toUpperCase() + data.status.slice(1) : 'Idle');
+            startButton.disabled = !!data.running;
+            if (data.status === 'failed') {
+              setMessage('Training failed. See logs for details.', true);
+            } else if (data.status === 'completed') {
+              setMessage('Training completed successfully.');
+            }
+            break;
+          case 'metrics':
+            updateMetric(data.run, { step: data.step, loss: data.loss });
+            break;
+          case 'log':
+            updateLog(data.line);
+            break;
+          default:
+            break;
+        }
+      }
+
+      const eventSource = new EventSource('/events');
+      eventSource.onmessage = handleEvent;
+      eventSource.onerror = () => {
+        setMessage('Lost connection to live updates. Retrying…', true);
+      };
+    </script>
+  </body>
+</html>
