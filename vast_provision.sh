@@ -39,9 +39,17 @@ chmod +x /workspace/analyze_training_logs.py
 
 # ensure huggingface-cli exists for downloads (system Python, outside venv)
 # Install latest version with system package handling
-python3 -m pip install -U "huggingface_hub>=0.20.0" --break-system-packages || \
-  python3 -m pip install -U huggingface_hub --break-system-packages || \
+python3 -m pip install -U "huggingface_hub[cli]>=0.20.0" --break-system-packages || \
+  python3 -m pip install -U "huggingface_hub[cli]" --break-system-packages || \
   python3 -m pip install -U huggingface_hub
+
+hf_download() {
+  if command -v huggingface-cli >/dev/null 2>&1; then
+    huggingface-cli download "$@"
+  else
+    python3 -m huggingface_hub download "$@"
+  fi
+}
 
 # install vastai CLI for instance management and cloud storage
 # Handle system package conflicts gracefully
@@ -98,22 +106,22 @@ fi
 
   mkdir -p models/text_encoders models/vae models/diffusion_models
 
-  hf download \
+  hf_download \
     Wan-AI/Wan2.1-I2V-14B-720P \
     models_t5_umt5-xxl-enc-bf16.pth \
     --local-dir models/text_encoders &
 
-  hf download \
+  hf_download \
     Comfy-Org/Wan_2.1_ComfyUI_repackaged \
     split_files/vae/wan_2.1_vae.safetensors \
     --local-dir models/vae &
 
-  hf download \
+  hf_download \
     Comfy-Org/Wan_2.2_ComfyUI_Repackaged \
     split_files/diffusion_models/wan2.2_t2v_high_noise_14B_fp16.safetensors \
     --local-dir models/diffusion_models &
 
-  hf download \
+  hf_download \
     Comfy-Org/Wan_2.2_ComfyUI_Repackaged \
     split_files/diffusion_models/wan2.2_t2v_low_noise_14B_fp16.safetensors \
     --local-dir models/diffusion_models &
@@ -142,8 +150,16 @@ EOF
   supervisorctl update || true
 fi
 
+if command -v supervisorctl >/dev/null 2>&1; then
+  rm -f /etc/portal.yaml
+fi
+
 if [[ -n "${PORTAL_CONFIG:-}" ]]; then
   export PORTAL_CONFIG="${PORTAL_CONFIG}|localhost:7860:17860:/:WAN Trainer UI"
 else
   export PORTAL_CONFIG="localhost:1111:11111:/:Instance Portal|localhost:7860:17860:/:WAN Trainer UI"
+fi
+
+if command -v supervisorctl >/dev/null 2>&1; then
+  supervisorctl reload || true
 fi
