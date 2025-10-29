@@ -80,9 +80,18 @@ python3 -m pip install -U vastai --break-system-packages || {
 }
 
 # lightweight web UI dependencies for the trainer
-python3 -m pip install -U flask waitress --break-system-packages || \
-  python3 -m pip install flask waitress --break-system-packages || \
-  python3 -m pip install flask waitress
+# Debian-based base images ship an older system "blinker" that cannot be removed by pip,
+# so force-install newer wheels without attempting an uninstall.
+python3 -m pip install \
+  --break-system-packages \
+  --upgrade \
+  --ignore-installed \
+  "blinker>=1.9.0" "flask>=3.1" "waitress>=3.0" || \
+  python3 -m pip install \
+    --break-system-packages \
+    --ignore-installed \
+    "blinker>=1.9.0" "flask" "waitress" || \
+  python3 -m pip install --ignore-installed "blinker>=1.9.0" flask waitress
 
 # Set up vastai API key - prefer VASTAI_KEY, fallback to CONTAINER_API_KEY
 if [[ -n "${VASTAI_KEY:-}" ]]; then
