@@ -30,8 +30,10 @@ else
   git -C wan22-lora-training pull --ff-only || true
 fi
 #test-do not merge
+cd wan22-lora-training
 git checkout codex/add-frontend-for-training-script
 git pull
+cd /workspace
 if [[ ! -d musubi-tuner ]]; then
   git clone --recursive https://github.com/kohya-ss/musubi-tuner.git
 fi
