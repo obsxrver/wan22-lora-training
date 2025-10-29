@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>WAN 2.2 LoRA Trainer</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  </head>
+  <body>
+    <main class="container">
+      <section>
+        <h1>WAN 2.2 LoRA Trainer</h1>
+        <p class="lead">
+          Drag your training assets into the drop zone, confirm the options that
+          <code>run_wan_training.sh</code> usually asks for, and press “Start Training”.
+        </p>
+      </section>
+
+      <section class="grid">
+        <article>
+          <form id="train-form">
+            <h2>Training Configuration</h2>
+            <div class="grid">
+              <label>
+                Title suffix
+                <input type="text" name="titleSuffix" value="mylora" required />
+              </label>
+              <label>
+                Author
+                <input type="text" name="author" value="authorName" required />
+              </label>
+            </div>
+            <div class="grid">
+              <label>
+                Save every N epochs
+                <input type="number" min="1" name="saveEvery" value="100" />
+              </label>
+              <label>
+                CPU threads per process
+                <input type="number" min="1" name="cpuThreads" placeholder="auto" />
+              </label>
+            </div>
+            <div class="grid">
+              <label>
+                Max data loader workers
+                <input type="number" min="1" name="maxLoaderWorkers" placeholder="auto" />
+              </label>
+              <label class="checkbox">
+                <input type="checkbox" name="uploadCloud" value="true" />
+                <span>Upload LoRAs to Vast.ai cloud storage when done</span>
+              </label>
+            </div>
+            <label class="checkbox">
+              <input type="checkbox" name="shutdownInstance" value="true" />
+              <span>Shut down the instance after training completes</span>
+            </label>
+
+            <div id="drop-zone" class="drop-zone">
+              <input id="file-input" type="file" name="files" multiple hidden />
+              <p>Drop images, videos and caption files here or click to browse.</p>
+              <p class="muted">Accepted files will be copied into a new dataset.toml automatically.</p>
+            </div>
+
+            <ul id="file-list" class="file-list"></ul>
+
+            <button id="start-button" type="submit" class="primary">Start Training</button>
+            <span id="status-indicator" class="status status-idle">Idle</span>
+          </form>
+        </article>
+
+        <article>
+          <h2>Live Training Metrics</h2>
+          <div class="metrics-grid">
+            <div class="metric-card">
+              <h3>High noise</h3>
+              <p>Step: <span id="high-step">–</span></p>
+              <p>Avg loss: <span id="high-loss">–</span></p>
+            </div>
+            <div class="metric-card">
+              <h3>Low noise</h3>
+              <p>Step: <span id="low-step">–</span></p>
+              <p>Avg loss: <span id="low-loss">–</span></p>
+            </div>
+          </div>
+          <canvas id="loss-chart" height="200"></canvas>
+        </article>
+      </section>
+
+      <section>
+        <h2>Training Log</h2>
+        <pre id="log-output" class="log-output"></pre>
+      </section>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
+    <script src="{{ url_for('static', filename='app.js') }}" type="module"></script>
+  </body>
+</html>

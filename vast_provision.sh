@@ -31,9 +31,9 @@ mkdir -p models/text_encoders models/vae models/diffusion_models
 mkdir -p /workspace/musubi-tuner/dataset
 
 # fetch dataset config and training helper ahead of parallel tasks
-curl -fsSL "https://raw.githubusercontent.com/obsxrver/wan22-lora-training/main/dataset.toml" -o /workspace/musubi-tuner/dataset/dataset.toml
-curl -fsSL "https://raw.githubusercontent.com/obsxrver/wan22-lora-training/main/run_wan_training.sh" -o /workspace/run_wan_training.sh
-curl -fsSL "https://raw.githubusercontent.com/obsxrver/wan22-lora-training/main/analyze_training_logs.py" -o /workspace/analyze_training_logs.py
+cp /workspace/wan22-lora-training/dataset.toml /workspace/musubi-tuner/dataset/dataset.toml
+cp /workspace/wan22-lora-training/run_wan_training.sh /workspace/run_wan_training.sh
+cp /workspace/wan22-lora-training/analyze_training_logs.py /workspace/analyze_training_logs.py
 chmod +x /workspace/run_wan_training.sh
 chmod +x /workspace/analyze_training_logs.py
 
@@ -49,6 +49,11 @@ python3 -m pip install -U vastai --break-system-packages || {
   echo "Warning: vastai installation had conflicts, trying alternative approach..."
   python3 -m pip install vastai --user --break-system-packages
 }
+
+# lightweight web UI dependencies for the trainer
+python3 -m pip install -U flask waitress --break-system-packages || \
+  python3 -m pip install flask waitress --break-system-packages || \
+  python3 -m pip install flask waitress
 
 # Set up vastai API key - prefer VASTAI_KEY, fallback to CONTAINER_API_KEY
 if [[ -n "${VASTAI_KEY:-}" ]]; then
@@ -120,3 +125,25 @@ fi
 wait_all
 
 echo "✅ Setup complete."
+
+# configure supervisor to host the WAN trainer UI and expose it in the portal
+if command -v supervisorctl >/dev/null 2>&1; then
+  cat <<'EOF' >/etc/supervisor/conf.d/wan-webui.conf
+[program:wan-webui]
+directory=/workspace/wan22-lora-training
+command=python3 -m webui.app
+autostart=true
+autorestart=true
+stdout_logfile=/var/log/wan-webui.log
+stderr_logfile=/var/log/wan-webui.err.log
+environment=PYTHONUNBUFFERED=1,WAN_WEBUI_PORT=7860
+EOF
+  supervisorctl reread || true
+  supervisorctl update || true
+fi
+
+if [[ -n "${PORTAL_CONFIG:-}" ]]; then
+  export PORTAL_CONFIG="${PORTAL_CONFIG}|localhost:7860:17860:/:WAN Trainer UI"
+else
+  export PORTAL_CONFIG="localhost:1111:11111:/:Instance Portal|localhost:7860:17860:/:WAN Trainer UI"
+fi

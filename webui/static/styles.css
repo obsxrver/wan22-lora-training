@@ -1,0 +1,108 @@
+body {
+  background: #0d1117;
+  color: #e6edf3;
+}
+
+main.container {
+  padding-top: 2rem;
+  padding-bottom: 3rem;
+}
+
+.lead {
+  color: #9ea7b3;
+}
+
+.drop-zone {
+  border: 2px dashed #3d444d;
+  border-radius: 0.75rem;
+  padding: 2rem;
+  text-align: center;
+  background: rgba(29, 37, 51, 0.6);
+  cursor: pointer;
+  transition: border-color 0.2s ease, background 0.2s ease;
+  margin-bottom: 1rem;
+}
+
+.drop-zone.drag-over {
+  border-color: #4cc2ff;
+  background: rgba(31, 119, 180, 0.15);
+}
+
+.file-list {
+  list-style: none;
+  padding-left: 0;
+  margin-bottom: 1.5rem;
+}
+
+.file-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 0.75rem;
+  background: rgba(29, 37, 51, 0.8);
+  border-radius: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.file-item button {
+  background: transparent;
+  border: none;
+  color: #ff6b6b;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.metric-card {
+  background: rgba(29, 37, 51, 0.8);
+  border-radius: 0.75rem;
+  padding: 1rem;
+  border: 1px solid rgba(76, 194, 255, 0.2);
+}
+
+.metric-card h3 {
+  margin-bottom: 0.25rem;
+}
+
+.log-output {
+  min-height: 200px;
+  max-height: 400px;
+  overflow-y: auto;
+  background: rgba(16, 20, 30, 0.9);
+  border-radius: 0.75rem;
+  padding: 1rem;
+  border: 1px solid rgba(61, 68, 77, 0.8);
+}
+
+.status {
+  margin-left: 1rem;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.status-idle {
+  color: #9ea7b3;
+}
+
+.status-starting,
+.status-running {
+  color: #4cc2ff;
+}
+
+.status-completed {
+  color: #5fe08f;
+}
+
+.status-failed {
+  color: #ff6b6b;
+}
+
+.status-warning {
+  color: #ffb347;
+}

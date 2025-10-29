@@ -277,6 +277,58 @@ calculate_cpu_params() {
   echo "$cpu_threads_per_process $max_data_loader_workers"
 }
 
+prompt_or_env() {
+  local var_name="$1"
+  local prompt_text="$2"
+  local default_value="$3"
+  local env_key="$4"
+
+  local env_value="${!env_key:-}"
+  if [[ -n "$env_value" ]]; then
+    printf -v "$var_name" '%s' "$env_value"
+    echo "$prompt_text$env_value (from $env_key)"
+    return
+  fi
+
+  if [[ -n "${WAN_NON_INTERACTIVE:-}" ]]; then
+    printf -v "$var_name" '%s' "$default_value"
+    echo "$prompt_text$default_value (default via WAN_NON_INTERACTIVE)"
+    return
+  fi
+
+  read -r -p "$prompt_text" user_input || true
+  if [[ -z "$user_input" ]]; then
+    user_input="$default_value"
+  fi
+  printf -v "$var_name" '%s' "$user_input"
+}
+
+confirm_or_env() {
+  local var_name="$1"
+  local prompt_text="$2"
+  local default_value="$3"
+  local env_key="$4"
+
+  local env_value="${!env_key:-}"
+  if [[ -n "$env_value" ]]; then
+    printf -v "$var_name" '%s' "$env_value"
+    echo "$prompt_text$env_value (from $env_key)"
+    return
+  fi
+
+  if [[ -n "${WAN_NON_INTERACTIVE:-}" ]]; then
+    printf -v "$var_name" '%s' "$default_value"
+    echo "$prompt_text$default_value (default via WAN_NON_INTERACTIVE)"
+    return
+  fi
+
+  read -r -p "$prompt_text" user_input || true
+  if [[ -z "$user_input" ]]; then
+    user_input="$default_value"
+  fi
+  printf -v "$var_name" '%s' "$user_input"
+}
+
 main() {
   if ! command -v nvidia-smi >/dev/null 2>&1; then
     echo "nvidia-smi is required but not found in PATH." >&2
@@ -285,14 +337,11 @@ main() {
 
   # Prompt inputs with defaults
   echo "WAN2.2 LoRA simple runner"
-  read -r -p "Title suffix (default: mylora): " TITLE_SUFFIX || true
-  TITLE_SUFFIX=${TITLE_SUFFIX:-mylora}
+  prompt_or_env TITLE_SUFFIX "Title suffix (default: mylora): " "mylora" "WAN_TITLE_SUFFIX"
 
-  read -r -p "Author (default: authorName): " AUTHOR || true
-  AUTHOR=${AUTHOR:-authorName}
+  prompt_or_env AUTHOR "Author (default: authorName): " "authorName" "WAN_AUTHOR"
 
-  read -r -p "Dataset path (default: $DEFAULT_DATASET): " DATASET || true
-  DATASET=${DATASET:-$DEFAULT_DATASET}
+  prompt_or_env DATASET "Dataset path (default: $DEFAULT_DATASET): " "$DEFAULT_DATASET" "WAN_DATASET"
 
   if [[ ! -f "$DATASET" ]]; then
     echo "Dataset config not found at $DATASET; downloading..."
@@ -300,19 +349,16 @@ main() {
     curl -fsSL "https://raw.githubusercontent.com/obsxrver/wan22-lora-training/main/dataset.toml" -o "$DATASET" || echo "Failed to download dataset.toml" >&2
   fi
 
-  read -r -p "Save every N epochs (default: 100): " SAVE_EVERY || true
-  SAVE_EVERY=${SAVE_EVERY:-100}
+  prompt_or_env SAVE_EVERY "Save every N epochs (default: 100): " "100" "WAN_SAVE_EVERY"
 
   CPU_PARAMS=($(calculate_cpu_params))
   DEFAULT_CPU_THREADS_PER_PROCESS=${CPU_PARAMS[0]}
   DEFAULT_MAX_DATA_LOADER_WORKERS=${CPU_PARAMS[1]}
 
   echo ""
-  read -r -p "CPU threads per process (default: $DEFAULT_CPU_THREADS_PER_PROCESS): " CPU_THREADS_PER_PROCESS || true
-  CPU_THREADS_PER_PROCESS=${CPU_THREADS_PER_PROCESS:-$DEFAULT_CPU_THREADS_PER_PROCESS}
+  prompt_or_env CPU_THREADS_PER_PROCESS "CPU threads per process (default: $DEFAULT_CPU_THREADS_PER_PROCESS): " "$DEFAULT_CPU_THREADS_PER_PROCESS" "WAN_CPU_THREADS_PER_PROCESS"
 
-  read -r -p "Max data loader workers (default: $DEFAULT_MAX_DATA_LOADER_WORKERS): " MAX_DATA_LOADER_WORKERS || true
-  MAX_DATA_LOADER_WORKERS=${MAX_DATA_LOADER_WORKERS:-$DEFAULT_MAX_DATA_LOADER_WORKERS}
+  prompt_or_env MAX_DATA_LOADER_WORKERS "Max data loader workers (default: $DEFAULT_MAX_DATA_LOADER_WORKERS): " "$DEFAULT_MAX_DATA_LOADER_WORKERS" "WAN_MAX_DATA_LOADER_WORKERS"
 
   HIGH_TITLE="WAN2.2-HighNoise_${TITLE_SUFFIX}"
   LOW_TITLE="WAN2.2-LowNoise_${TITLE_SUFFIX}"
@@ -324,28 +370,24 @@ main() {
   UPLOAD_CLOUD="Y"
   if check_cloud_configured; then
     echo "Cloud storage is configured in Vast.ai."
-    read -r -p "Upload LoRAs to cloud storage after training? [Y/n]: " UPLOAD_CLOUD || true
-    UPLOAD_CLOUD=${UPLOAD_CLOUD:-Y}
+    confirm_or_env UPLOAD_CLOUD "Upload LoRAs to cloud storage after training? [Y/n]: " "Y" "WAN_UPLOAD_CLOUD"
   else
     echo "No cloud connections configured. To set up:"
     echo "  1. Install vastai CLI if missing: pip install vastai --user --break-system-packages"
     echo "  2. Go to Vast.ai Console > Cloud Connections"
     echo "  3. Add a connection to Google Drive, AWS S3, or other cloud provider"
     echo "  4. Follow the authentication steps"
-    read -r -p "Upload LoRAs to cloud storage after training? [Y/n]: " UPLOAD_CLOUD || true
-    UPLOAD_CLOUD=${UPLOAD_CLOUD:-Y}
+    confirm_or_env UPLOAD_CLOUD "Upload LoRAs to cloud storage after training? [Y/n]: " "Y" "WAN_UPLOAD_CLOUD"
   fi
 
   # Check for instance shutdown option
   SHUTDOWN_INSTANCE="Y"
   if [[ -n "${CONTAINER_ID:-}" ]] && command -v vastai >/dev/null 2>&1; then
     echo "Vast.ai instance management available."
-    read -r -p "Shut down this instance after training to save costs? [Y/n]: " SHUTDOWN_INSTANCE || true
-    SHUTDOWN_INSTANCE=${SHUTDOWN_INSTANCE:-Y}
+    confirm_or_env SHUTDOWN_INSTANCE "Shut down this instance after training to save costs? [Y/n]: " "Y" "WAN_SHUTDOWN_INSTANCE"
   else
     echo "Vast.ai CLI not available or not running on Vast.ai instance."
-    read -r -p "Shut down this instance after training to save costs? [Y/n]: " SHUTDOWN_INSTANCE || true
-    SHUTDOWN_INSTANCE=${SHUTDOWN_INSTANCE:-Y}
+    confirm_or_env SHUTDOWN_INSTANCE "Shut down this instance after training to save costs? [Y/n]: " "Y" "WAN_SHUTDOWN_INSTANCE"
   fi
 
   echo ""
@@ -358,8 +400,7 @@ main() {
   echo "  Upload to cloud: $UPLOAD_CLOUD"
   echo "  Auto-shutdown: $SHUTDOWN_INSTANCE"
   echo ""
-  read -r -p "Proceed with training? [Y/n]: " PROCEED || true
-  PROCEED=${PROCEED:-Y}
+  confirm_or_env PROCEED "Proceed with training? [Y/n]: " "Y" "WAN_PROCEED"
   if [[ ! "$PROCEED" =~ ^[Yy]?$ ]]; then
     echo "Training cancelled."
     exit 0
