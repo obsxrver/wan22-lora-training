@@ -83,6 +83,7 @@ fi
   pip install protobuf
   pip install six
   pip install matplotlib
+  pip install fastapi "uvicorn[standard]" python-multipart
   pip install torch torchvision
 ) & pids+=($!)
 
@@ -118,5 +119,52 @@ fi
 
 # ---------- wait for both tasks ----------
 wait_all
+
+WEBUI_PORT=7865
+cat <<'EOF' >/workspace/wan22-lora-training/start_wan_webui.sh
+#!/bin/bash
+set -euo pipefail
+WEBUI_PORT="${WEBUI_PORT:-7865}"
+cd /workspace/wan22-lora-training
+source /workspace/musubi-tuner/venv/bin/activate
+exec uvicorn webui.server:app --host 0.0.0.0 --port "${WEBUI_PORT}"
+EOF
+chmod +x /workspace/wan22-lora-training/start_wan_webui.sh
+
+if command -v supervisorctl >/dev/null 2>&1; then
+  sudo tee /etc/supervisor/conf.d/wan-training-webui.conf >/dev/null <<'EOF'
+[program:wan-training-webui]
+command=/bin/bash /workspace/wan22-lora-training/start_wan_webui.sh
+directory=/workspace/wan22-lora-training
+autostart=true
+autorestart=true
+stdout_logfile=/workspace/wan-training-webui.out.log
+stderr_logfile=/workspace/wan-training-webui.err.log
+stopasgroup=true
+killasgroup=true
+environment=PYTHONUNBUFFERED=1
+EOF
+  sudo supervisorctl reread || true
+  sudo supervisorctl update || true
+fi
+
+PORTAL_ENTRY="0.0.0.0:${WEBUI_PORT}:${WEBUI_PORT}:/:WAN Training UI"
+if [[ -n "${PORTAL_CONFIG:-}" ]]; then
+  case "${PORTAL_CONFIG}" in
+    *"${PORTAL_ENTRY}"*) ;;
+    *) PORTAL_CONFIG="${PORTAL_CONFIG}|${PORTAL_ENTRY}" ;;
+  esac
+else
+  PORTAL_CONFIG="${PORTAL_ENTRY}"
+fi
+export PORTAL_CONFIG
+
+sudo tee /etc/profile.d/wan_portal.sh >/dev/null <<EOF
+export PORTAL_CONFIG="${PORTAL_CONFIG}"
+EOF
+
+if command -v supervisorctl >/dev/null 2>&1; then
+  sudo supervisorctl restart portal || true
+fi
 
 echo "✅ Setup complete."
