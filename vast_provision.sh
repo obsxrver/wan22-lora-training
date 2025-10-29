@@ -19,6 +19,9 @@ wait_all() {
 
 # ---------- prep (sequential) ----------
 cd /workspace
+if [[ ! -d wan22-lora-training ]]; then
+  git clone https://github.com/obsxrver/wan22-lora-training.git
+fi
 if [[ ! -d musubi-tuner ]]; then
   git clone --recursive https://github.com/kohya-ss/musubi-tuner.git
 fi
