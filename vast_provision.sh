@@ -19,6 +19,17 @@ wait_all() {
 
 # ---------- prep (sequential) ----------
 cd /workspace
+
+# ensure the wan22-lora-training repo is present for local assets like the web UI
+if [[ ! -d wan22-lora-training/.git ]]; then
+  echo "Cloning wan22-lora-training helper repo..."
+  rm -rf wan22-lora-training
+  git clone https://github.com/obsxrver/wan22-lora-training.git
+else
+  echo "Updating wan22-lora-training helper repo..."
+  git -C wan22-lora-training pull --ff-only || true
+fi
+
 if [[ ! -d musubi-tuner ]]; then
   git clone --recursive https://github.com/kohya-ss/musubi-tuner.git
 fi
@@ -36,6 +47,12 @@ cp /workspace/wan22-lora-training/run_wan_training.sh /workspace/run_wan_trainin
 cp /workspace/wan22-lora-training/analyze_training_logs.py /workspace/analyze_training_logs.py
 chmod +x /workspace/run_wan_training.sh
 chmod +x /workspace/analyze_training_logs.py
+
+# guarantee supervisor is available on the base PyTorch image so the UI can start
+if ! command -v supervisorctl >/dev/null 2>&1; then
+  sudo apt-get update
+  sudo apt-get install -y supervisor
+fi
 
 # ensure huggingface-cli exists for downloads (system Python, outside venv)
 # Install latest version with system package handling
