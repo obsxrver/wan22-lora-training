@@ -31,6 +31,8 @@ LOSS_PATTERNS = [
     re.compile(r"loss(?:=|:)\s*([0-9]+(?:\.[0-9]+)?(?:[eE][-+]?\d+)?)"),
     re.compile(r"Loss\s*=?\s*([0-9]+(?:\.[0-9]+)?(?:[eE][-+]?\d+)?)"),
 ]
+# we are parsing lines in /workspace/musubi-tuner/ruh_high.log and /workspace/musubi-tuner/run_low.log that look like this:
+# steps:   1%|          | 30/5200 [01:38<4:43:19,  3.29s/it, avr_loss=0.129]
 MAX_HISTORY_POINTS = 2000
 MAX_LOG_LINES = 400
 
