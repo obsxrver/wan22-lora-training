@@ -423,7 +423,7 @@ main() {
     SAVE_EVERY="$SAVE_EVERY_INPUT"
     echo "Save every N epochs (auto): $SAVE_EVERY"
   fi
-  SAVE_EVERY=${SAVE_EVERY:-100}
+  SAVE_EVERY=${SAVE_EVERY:-20}
 
   CPU_PARAMS=($(calculate_cpu_params))
   DEFAULT_CPU_THREADS_PER_PROCESS=${CPU_PARAMS[0]}
