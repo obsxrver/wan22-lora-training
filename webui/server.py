@@ -35,6 +35,7 @@ EPOCH_PATTERNS = [
     re.compile(r"Epoch\s+(\d+)(?:\s*/\s*(\d+))?"),
     re.compile(r"Epoch\s+(\d+):"),
     re.compile(r"epoch(?:=|:)\s*(\d+)(?:\s*/\s*(\d+))?"),
+    re.compile(r"epoch\s+(\d+)(?:\s*/\s*(\d+))?", re.IGNORECASE),
 ]
 LOSS_PATTERNS = [
     re.compile(r"train_loss(?:=|:)\s*([0-9]+(?:\.[0-9]+)?(?:[eE][-+]?\d+)?)"),
