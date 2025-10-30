@@ -125,6 +125,15 @@
         gap: 0.4rem;
       }
 
+      a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+
+      a:hover {
+        color: var(--accent-strong);
+      }
+
       input[type="text"],
       input[type="number"] {
         padding: 0.6rem 0.75rem;
@@ -147,6 +156,11 @@
         gap: 0.6rem;
         font-weight: 600;
         color: var(--muted);
+      }
+
+      .toggle.disabled {
+        opacity: 0.5;
+        pointer-events: none;
       }
 
       button {
@@ -197,6 +211,33 @@
         border-radius: 14px;
         padding: 1rem;
         background: rgba(255, 255, 255, 0.03);
+      }
+
+      .status-note {
+        font-size: 0.9rem;
+        color: var(--muted);
+      }
+
+      #cloudStatusMessage,
+      #apiKeyMessage {
+        min-height: 1.2rem;
+      }
+
+      .api-key-row {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        margin-top: 0.5rem;
+      }
+
+      .api-key-row input[type="text"] {
+        flex: 1;
+      }
+
+      .button-inline {
+        padding: 0.6rem 1rem;
+        border-radius: 12px;
+        white-space: nowrap;
       }
 
       .metric-card h3 {
@@ -299,6 +340,20 @@
               Shut down instance after training
             </label>
           </div>
+          <div id="cloudStatusMessage" class="status-note" aria-live="polite"></div>
+          <div class="form-row">
+            <label>
+              Vast.ai API key for cloud uploads
+              <span class="status-note"
+                >Need a key? <a href="https://cloud.vast.ai/manage-keys" target="_blank" rel="noopener">Create one on Vast.ai</a>.</span
+              >
+              <div class="api-key-row">
+                <input type="text" id="vastApiKeyInput" placeholder="Enter Vast.ai API key" autocomplete="off" spellcheck="false" />
+                <button type="button" id="saveApiKeyButton" class="button-inline">Save key</button>
+              </div>
+              <div id="apiKeyMessage" class="status-note" aria-live="polite"></div>
+            </label>
+          </div>
           <div class="form-row two-col">
             <button id="startButton" type="submit">Start training</button>
             <button id="stopButton" type="button" class="button-secondary" disabled>Stop training</button>
@@ -364,9 +419,128 @@
       const lowEtaEl = document.getElementById('lowEta');
       const stopButton = document.getElementById('stopButton');
       const logOutput = document.getElementById('logOutput');
+      const uploadCloudCheckbox = form.querySelector('input[name="uploadCloud"]');
+      const uploadCloudLabel = uploadCloudCheckbox ? uploadCloudCheckbox.closest('.toggle') : null;
+      const cloudStatusMessageEl = document.getElementById('cloudStatusMessage');
+      const apiKeyInput = document.getElementById('vastApiKeyInput');
+      const apiKeyButton = document.getElementById('saveApiKeyButton');
+      const apiKeyMessageEl = document.getElementById('apiKeyMessage');
+      let currentCloudStatus = null;
 
       const MAX_LOG_LINES = 400;
       const logLines = [];
+
+      function setApiKeyMessage(text = '', isError = false) {
+        if (!apiKeyMessageEl) {
+          return;
+        }
+        apiKeyMessageEl.textContent = text;
+        apiKeyMessageEl.style.color = isError ? '#ff8a80' : 'var(--muted)';
+      }
+
+      function setCloudStatusUI(status) {
+        currentCloudStatus = status || null;
+        if (cloudStatusMessageEl) {
+          const message = status?.message || '';
+          cloudStatusMessageEl.textContent = message;
+          if (!status) {
+            cloudStatusMessageEl.style.color = 'var(--muted)';
+          } else if (status.permission_error) {
+            cloudStatusMessageEl.style.color = '#ff8a80';
+          } else if (status.can_upload) {
+            cloudStatusMessageEl.style.color = 'var(--accent)';
+          } else {
+            cloudStatusMessageEl.style.color = 'var(--muted)';
+          }
+        }
+
+        if (!uploadCloudCheckbox) {
+          return;
+        }
+
+        const disableCheckbox = !status || status.permission_error || !status.cli_available;
+        uploadCloudCheckbox.disabled = disableCheckbox;
+        if (disableCheckbox) {
+          uploadCloudCheckbox.checked = false;
+        } else if (status && !status.has_connections) {
+          uploadCloudCheckbox.checked = false;
+        }
+
+        if (uploadCloudLabel) {
+          uploadCloudLabel.classList.toggle('disabled', disableCheckbox);
+        }
+      }
+
+      async function refreshCloudStatus() {
+        try {
+          const response = await fetch('/cloud-status');
+          if (!response.ok) {
+            throw new Error('Failed to fetch cloud status');
+          }
+          const data = await response.json();
+          setCloudStatusUI(data);
+        } catch (error) {
+          if (cloudStatusMessageEl) {
+            cloudStatusMessageEl.textContent = 'Unable to determine cloud connection status.';
+            cloudStatusMessageEl.style.color = '#ff8a80';
+          }
+          currentCloudStatus = null;
+        }
+      }
+
+      async function saveApiKey() {
+        if (!apiKeyInput) {
+          return;
+        }
+        const apiKey = apiKeyInput.value.trim();
+        if (!apiKey) {
+          setApiKeyMessage('Enter an API key from https://cloud.vast.ai/manage-keys.', true);
+          return;
+        }
+
+        if (apiKeyButton) {
+          apiKeyButton.disabled = true;
+        }
+        setApiKeyMessage('Saving API key…');
+
+        try {
+          const response = await fetch('/vast-api-key', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ api_key: apiKey }),
+          });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            throw new Error(data.detail || 'Failed to save API key');
+          }
+          apiKeyInput.value = '';
+          setApiKeyMessage(data.message || 'API key saved.');
+          if (data.cloud_status) {
+            setCloudStatusUI(data.cloud_status);
+          } else {
+            await refreshCloudStatus();
+          }
+        } catch (error) {
+          setApiKeyMessage(error.message || 'Failed to save API key.', true);
+        } finally {
+          if (apiKeyButton) {
+            apiKeyButton.disabled = false;
+          }
+        }
+      }
+
+      if (apiKeyButton) {
+        apiKeyButton.addEventListener('click', saveApiKey);
+      }
+
+      if (apiKeyInput) {
+        apiKeyInput.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            saveApiKey();
+          }
+        });
+      }
 
       const runDisplays = {
         high: {
@@ -386,6 +560,8 @@
           eta: lowEtaEl,
         },
       };
+
+      refreshCloudStatus();
 
       function updateRunDisplay(run, current) {
         const display = runDisplays[run];
@@ -648,6 +824,10 @@
           shutdown_instance: formData.get('shutdownInstance') === 'on',
           auto_confirm: true,
         };
+
+        if (currentCloudStatus && !currentCloudStatus.can_upload) {
+          payload.upload_cloud = false;
+        }
 
         if (!payload.dataset_path) {
           setMessage('Dataset config path is required.', true);
