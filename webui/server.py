@@ -3,6 +3,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 from collections import deque
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -18,6 +19,9 @@ DATASET_ROOT = Path("/workspace/musubi-tuner/dataset")
 LOG_DIR = Path("/workspace/musubi-tuner")
 HIGH_LOG = LOG_DIR / "run_high.log"
 LOW_LOG = LOG_DIR / "run_low.log"
+API_KEY_CONFIG_PATH = Path.home() / ".config" / "vastai" / "vast_api_key"
+MANAGE_KEYS_URL = "https://cloud.vast.ai/manage-keys"
+CLOUD_SETTINGS_URL = "https://cloud.vast.ai/settings/"
 DATASET_ROOT.mkdir(parents=True, exist_ok=True)
 
 STEP_PATTERNS = [
@@ -47,6 +51,122 @@ MAX_HISTORY_POINTS = 2000
 MAX_LOG_LINES = 400
 
 
+def parse_cloud_connections(output: str) -> List[Dict[str, str]]:
+    connections: List[Dict[str, str]] = []
+    for line in output.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("https://"):
+            continue
+        if stripped.lower().startswith("id"):
+            continue
+        parts = stripped.split()
+        if len(parts) < 3 or not parts[0].isdigit():
+            continue
+        connection_id = parts[0]
+        cloud_type = parts[-1]
+        name = " ".join(parts[1:-1]) if len(parts) > 2 else ""
+        connections.append({"id": connection_id, "name": name, "cloud_type": cloud_type})
+    return connections
+
+
+def is_api_key_configured() -> bool:
+    try:
+        return API_KEY_CONFIG_PATH.exists() and API_KEY_CONFIG_PATH.read_text(encoding="utf-8").strip() != ""
+    except OSError:
+        return False
+
+
+def maybe_set_container_api_key() -> None:
+    container_key = os.environ.get("CONTAINER_API_KEY")
+    if not container_key or is_api_key_configured():
+        return
+    if shutil.which("vastai") is None:
+        return
+    try:
+        subprocess.run(
+            ["vastai", "set", "api-key", container_key],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except OSError:
+        return
+
+
+async def gather_cloud_status() -> Dict[str, Any]:
+    cli_available = shutil.which("vastai") is not None
+    api_key_configured = is_api_key_configured()
+
+    if not cli_available:
+        return {
+            "cli_available": False,
+            "api_key_configured": api_key_configured,
+            "permission_error": False,
+            "has_connections": False,
+            "can_upload": False,
+            "message": "vastai CLI not found. Install it with: pip install vastai --user --break-system-packages",
+            "connections": [],
+        }
+
+    try:
+        process = await asyncio.create_subprocess_exec(
+            "vastai",
+            "show",
+            "connections",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout_bytes, stderr_bytes = await process.communicate()
+    except FileNotFoundError:
+        return {
+            "cli_available": False,
+            "api_key_configured": api_key_configured,
+            "permission_error": False,
+            "has_connections": False,
+            "can_upload": False,
+            "message": "vastai CLI not found. Install it with: pip install vastai --user --break-system-packages",
+            "connections": [],
+        }
+
+    output = (stdout_bytes + stderr_bytes).decode("utf-8", errors="ignore")
+    lower_output = output.lower()
+    permission_error = "failed with error 401" in lower_output
+    connections: List[Dict[str, str]] = []
+
+    if not permission_error:
+        connections = parse_cloud_connections(output)
+
+    has_connections = bool(connections)
+    can_upload = cli_available and not permission_error and has_connections
+
+    if permission_error:
+        message = (
+            "Current Vast.ai API key lacks the permissions required for cloud uploads. "
+            f"Create a new key at {MANAGE_KEYS_URL} and save it below."
+        )
+    elif not has_connections:
+        message = (
+            "No cloud connections detected. Configure one at "
+            f"{CLOUD_SETTINGS_URL} and open \"cloud connection\" to link storage."
+        )
+    elif process.returncode != 0:
+        message = output.strip() or "Failed to query cloud connections."
+    else:
+        message = "Cloud uploads are ready to use."
+
+    return {
+        "cli_available": cli_available,
+        "api_key_configured": api_key_configured,
+        "permission_error": permission_error,
+        "has_connections": has_connections,
+        "can_upload": can_upload,
+        "message": message,
+        "connections": connections,
+    }
+
+
+maybe_set_container_api_key()
+
 class TrainRequest(BaseModel):
     title_suffix: str = Field(default="mylora", min_length=1)
     author: str = Field(default="authorName", min_length=1)
@@ -57,6 +177,10 @@ class TrainRequest(BaseModel):
     upload_cloud: bool = True
     shutdown_instance: bool = True
     auto_confirm: bool = True
+
+
+class ApiKeyRequest(BaseModel):
+    api_key: str = Field(min_length=1)
 
 
 class EventManager:
@@ -290,6 +414,42 @@ async def upload(files: List[UploadFile] = File(...)) -> Dict:
     return {"saved": saved, "count": len(saved)}
 
 
+@app.get("/cloud-status")
+async def cloud_status() -> Dict[str, Any]:
+    return await gather_cloud_status()
+
+
+@app.post("/vast-api-key")
+async def set_vast_api_key(payload: ApiKeyRequest) -> Dict[str, Any]:
+    api_key = payload.api_key.strip()
+    if not api_key:
+        raise HTTPException(status_code=400, detail="API key is required.")
+    if shutil.which("vastai") is None:
+        raise HTTPException(status_code=500, detail="vastai CLI is not installed on this instance.")
+
+    env = os.environ.copy()
+    try:
+        process = await asyncio.create_subprocess_exec(
+            "vastai",
+            "set",
+            "api-key",
+            api_key,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env,
+        )
+        stdout_bytes, stderr_bytes = await process.communicate()
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=500, detail="vastai CLI is not installed on this instance.") from exc
+
+    message = (stdout_bytes + stderr_bytes).decode("utf-8", errors="ignore").strip()
+    if process.returncode != 0:
+        raise HTTPException(status_code=400, detail=message or "Failed to save API key.")
+
+    status = await gather_cloud_status()
+    return {"message": message or "API key saved.", "cloud_status": status}
+
+
 async def stream_process_output(process: asyncio.subprocess.Process) -> None:
     if process.stdout is None:
         return
@@ -457,6 +617,14 @@ async def start_training(payload: TrainRequest) -> Dict:
             log_path.unlink()
         except FileNotFoundError:
             pass
+
+    cloud_status = await gather_cloud_status()
+    if payload.upload_cloud and not cloud_status.get("can_upload", False):
+        payload.upload_cloud = False
+        reason = cloud_status.get("message") or "Cloud uploads are not available."
+        note = f"Cloud uploads disabled: {reason}"
+        training_state.append_log(note)
+        await event_manager.publish({"type": "log", "line": note})
 
     command = build_command(payload)
     env = os.environ.copy()
