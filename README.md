@@ -1,4 +1,4 @@
-# WAN2.2 LoRa Training Workflow and Quick Start
+# WAN2.2 LoRa Training WebUI
 
 ### Looking for help with captioning? Auto-caption in under a minute with [https://obsxrver.pro/SillyCaption](https://obsxrver.pro/SillyCaption)
 
