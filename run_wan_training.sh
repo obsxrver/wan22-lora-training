@@ -241,7 +241,7 @@ lines = [line.strip() for line in output.splitlines() if line.strip()]
 if len(lines) < 2:
     sys.exit(1)
 
-header = re.split(r"\s+", lines[0])
+header = re.split(r"\s{2,}", lines[0])
 column_names = {name.lower(): idx for idx, name in enumerate(header)}
 idx = None
 for key in ("vcpus", "vcpu", "cpu"):
@@ -252,7 +252,7 @@ if idx is None:
     sys.exit(1)
 
 for line in lines[1:]:
-    parts = re.split(r"\s+", line)
+    parts = re.split(r"\s{2,}", line)
     if not parts:
         continue
     if parts[0] != container_id:
