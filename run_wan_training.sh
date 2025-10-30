@@ -28,6 +28,10 @@ CLI_UPLOAD_CLOUD="${WAN_UPLOAD_CLOUD:-}"
 CLI_SHUTDOWN_INSTANCE="${WAN_SHUTDOWN_INSTANCE:-}"
 AUTO_CONFIRM=0
 
+CLOUD_PERMISSION_DENIED=0
+CLOUD_CONNECTION_MESSAGE=""
+CPU_THREAD_SOURCE=""
+
 print_usage() {
   cat <<'EOF'
 Usage: run_wan_training.sh [options]
@@ -205,10 +209,101 @@ determine_attention_flags() {
   fi
 }
 
+get_vast_vcpus() {
+  if [[ -z "${CONTAINER_ID:-}" ]]; then
+    return 1
+  fi
+
+  if ! command -v vastai >/dev/null 2>&1; then
+    return 1
+  fi
+
+  local result
+  result=$(python3 - "$CONTAINER_ID" <<'PY'
+import re
+import subprocess
+import sys
+
+container_id = sys.argv[1].strip()
+if not container_id:
+    sys.exit(1)
+
+try:
+    output = subprocess.check_output(
+        ["vastai", "show", "instance", container_id],
+        text=True,
+        stderr=subprocess.STDOUT,
+    )
+except Exception:
+    sys.exit(1)
+
+lines = [line.strip() for line in output.splitlines() if line.strip()]
+if len(lines) < 2:
+    sys.exit(1)
+
+header = re.split(r"\s{2,}", lines[0])
+column_names = {name.lower(): idx for idx, name in enumerate(header)}
+idx = None
+for key in ("vcpus", "vcpu", "cpu"):
+    if key in column_names:
+        idx = column_names[key]
+        break
+if idx is None:
+    sys.exit(1)
+
+for line in lines[1:]:
+    parts = re.split(r"\s{2,}", line)
+    if not parts:
+        continue
+    if parts[0] != container_id:
+        continue
+    try:
+        value = float(parts[idx])
+    except (IndexError, ValueError):
+        continue
+    print(int(value))
+    sys.exit(0)
+
+sys.exit(1)
+PY
+)
+  if [[ -n "$result" ]]; then
+    echo "$result"
+    return 0
+  fi
+
+  return 1
+}
+
 get_cpu_threads() {
-  local threads
-  threads=$(nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo 2>/dev/null || echo "8")
-  echo "$threads"
+  local value
+
+  CPU_THREAD_SOURCE=""
+  if value=$(get_vast_vcpus 2>/dev/null); then
+    if [[ -n "$value" && "$value" =~ ^[0-9]+$ && "$value" -gt 0 ]]; then
+      CPU_THREAD_SOURCE="vastai show instance"
+      echo "$value"
+      return 0
+    fi
+  fi
+
+  value=$(nproc 2>/dev/null || true)
+  if [[ -n "$value" && "$value" =~ ^[0-9]+$ && "$value" -gt 0 ]]; then
+    CPU_THREAD_SOURCE="nproc"
+    echo "$value"
+    return 0
+  fi
+
+  value=$(grep -c ^processor /proc/cpuinfo 2>/dev/null || true)
+  if [[ -n "$value" && "$value" =~ ^[0-9]+$ && "$value" -gt 0 ]]; then
+    CPU_THREAD_SOURCE="/proc/cpuinfo"
+    echo "$value"
+    return 0
+  fi
+
+  CPU_THREAD_SOURCE=""
+  echo ""
+  return 1
 }
 
 prompt_for_valid_api_key() {
@@ -239,8 +334,8 @@ prompt_for_valid_api_key() {
       local output
       output=$(vastai show connections 2>&1)
       
-      if echo "$output" | grep -q "failed with error 401: Authentication required"; then
-        echo "API key is still invalid. Please try again."
+      if echo "$output" | grep -qi "failed with error 401"; then
+        echo "API key is still invalid or missing required permissions. Please try again."
         continue
       else
         echo "✅ API key set successfully!"
@@ -254,28 +349,32 @@ prompt_for_valid_api_key() {
 
 check_cloud_configured() {
   # Check if Vast.ai cloud connections are configured
+  CLOUD_PERMISSION_DENIED=0
+  CLOUD_CONNECTION_MESSAGE=""
   if ! command -v vastai >/dev/null 2>&1; then
     echo "vastai CLI not found. Try: pip install vastai --user --break-system-packages" >&2
+    CLOUD_CONNECTION_MESSAGE="vastai CLI not found. Install it with: pip install vastai --user --break-system-packages"
     return 1
   fi
-  
+
   # Check if API key is valid by testing vastai show connections
   local output
-  output=$(vastai show connections 2>&1)
-  
-  # Check for authentication error (401)
-  if echo "$output" | grep -q "failed with error 401: Authentication required"; then
-    echo "Current API key is invalid or expired." >&2
-    prompt_for_valid_api_key
-    return $?
+  output=$(vastai show connections 2>&1 || true)
+
+  if echo "$output" | grep -qi "failed with error 401"; then
+    CLOUD_PERMISSION_DENIED=1
+    CLOUD_CONNECTION_MESSAGE=$'Current Vast.ai API key lacks the permissions required to list cloud connections.\nCreate a new key at https://cloud.vast.ai/manage-keys (enable user_read and cloud permissions) and run: vastai set api-key <your-key>'
+    echo "Current API key cannot access cloud integrations (401)." >&2
+    return 1
   fi
-  
+
   # Check if there are any cloud connections (skip header and URL lines)
   local connections
-  connections=$(echo "$output" | grep -v "^ID" | grep -v "^https://" | head -1)
+  connections=$(echo "$output" | awk 'NF && $1 ~ /^[0-9]+$/ {print $0; exit}')
   if [[ -n "$connections" ]]; then
     return 0
   fi
+  CLOUD_CONNECTION_MESSAGE=$'No cloud connections detected. Visit https://cloud.vast.ai/settings/ and open "cloud connection" to link a storage provider.'
   return 1
 }
 
@@ -285,19 +384,34 @@ setup_vast_api_key() {
     echo "Warning: CONTAINER_ID not found. Cannot set up instance shutdown." >&2
     return 1
   fi
-  
-  # Check if API key is valid
-  local output
-  output=$(vastai show connections 2>&1)
-  
-  if echo "$output" | grep -q "failed with error 401: Authentication required"; then
-    echo "Current API key is invalid for instance management."
-    prompt_for_valid_api_key
-    return $?
-  else
-    echo "Vast.ai API key is valid for instance management."
+
+  if ! command -v vastai >/dev/null 2>&1; then
+    echo "Warning: vastai CLI not found. Cannot set up instance shutdown." >&2
+    return 1
+  fi
+
+  local config_path="$HOME/.config/vastai/vast_api_key"
+  local existing_key=""
+  if [[ -f "$config_path" ]]; then
+    existing_key=$(tr -d '\r\n\t ' <"$config_path")
+  fi
+
+  if [[ -n "$existing_key" ]]; then
+    echo "Using existing Vast.ai API key for instance management."
     return 0
   fi
+
+  if [[ -n "${CONTAINER_API_KEY:-}" ]]; then
+    if vastai set api-key "$CONTAINER_API_KEY" >/dev/null 2>&1; then
+      echo "Configured container API key for instance management."
+      return 0
+    else
+      echo "Warning: Failed to configure container API key for instance management." >&2
+    fi
+  fi
+
+  echo "No Vast.ai API key configured for instance shutdown. Run 'vastai set api-key <your-key>' to enable this feature." >&2
+  return 1
 }
 
 upload_to_cloud() {
@@ -360,21 +474,33 @@ shutdown_instance() {
 calculate_cpu_params() {
   local threads
   threads=$(get_cpu_threads)
-  local cpu_threads_per_process=$((threads / 4))
-  local max_data_loader_workers=$((threads / 8))
-  
-  # Ensure minimum values
-  if [[ "$cpu_threads_per_process" -lt 1 ]]; then
-    cpu_threads_per_process=1
+  local cpu_threads_per_process
+  local max_data_loader_workers
+
+  if [[ -n "$threads" && "$threads" =~ ^[0-9]+$ && "$threads" -gt 0 ]]; then
+    cpu_threads_per_process=$((threads / 4))
+    max_data_loader_workers=$((threads / 8))
+
+    if [[ "$cpu_threads_per_process" -lt 1 ]]; then
+      cpu_threads_per_process=1
+    fi
+    if [[ "$max_data_loader_workers" -lt 1 ]]; then
+      max_data_loader_workers=1
+    fi
+
+    if [[ -n "$CPU_THREAD_SOURCE" ]]; then
+      echo "Detected $threads CPU threads via $CPU_THREAD_SOURCE." >&2
+    else
+      echo "Detected $threads CPU threads." >&2
+    fi
+    echo "Setting --num_cpu_threads_per_process=$cpu_threads_per_process" >&2
+    echo "Setting --max_data_loader_n_workers=$max_data_loader_workers" >&2
+  else
+    cpu_threads_per_process=8
+    max_data_loader_workers=8
+    echo "Could not determine CPU threads automatically; defaulting to 8 threads for training and data loading." >&2
   fi
-  if [[ "$max_data_loader_workers" -lt 1 ]]; then
-    max_data_loader_workers=1
-  fi
-  
-  echo "Detected $threads CPU threads" >&2
-  echo "Setting --num_cpu_threads_per_process=$cpu_threads_per_process" >&2
-  echo "Setting --max_data_loader_n_workers=$max_data_loader_workers" >&2
-  
+
   echo "$cpu_threads_per_process $max_data_loader_workers"
 }
 
@@ -454,22 +580,40 @@ main() {
 
   # Check for cloud storage upload option
   UPLOAD_CLOUD="Y"
+  local cloud_ready=0
+  if check_cloud_configured; then
+    cloud_ready=1
+  fi
+
   if [[ -n "${CLI_UPLOAD_CLOUD:-}" ]]; then
     UPLOAD_CLOUD="$CLI_UPLOAD_CLOUD"
     echo "Upload LoRAs to cloud storage after training? [auto: $UPLOAD_CLOUD]"
+    if [[ "$UPLOAD_CLOUD" =~ ^[Yy]$ && $cloud_ready -eq 0 ]]; then
+      if (( CLOUD_PERMISSION_DENIED )); then
+        echo "$CLOUD_CONNECTION_MESSAGE" >&2
+        echo "Disabling cloud upload because the current API key lacks required permissions." >&2
+        UPLOAD_CLOUD="N"
+      else
+        echo "$CLOUD_CONNECTION_MESSAGE" >&2
+        echo "Disabling cloud upload because no cloud connections are available." >&2
+        UPLOAD_CLOUD="N"
+      fi
+    fi
   else
-    if check_cloud_configured; then
+    if (( cloud_ready )); then
       echo "Cloud storage is configured in Vast.ai."
       read -r -p "Upload LoRAs to cloud storage after training? [Y/n]: " UPLOAD_CLOUD || true
       UPLOAD_CLOUD=${UPLOAD_CLOUD:-Y}
     else
-      echo "No cloud connections configured. To set up:"
-      echo "  1. Install vastai CLI if missing: pip install vastai --user --break-system-packages"
-      echo "  2. Go to Vast.ai Console > Cloud Connections"
-      echo "  3. Add a connection to Google Drive, AWS S3, or other cloud provider"
-      echo "  4. Follow the authentication steps"
-      read -r -p "Upload LoRAs to cloud storage after training? [Y/n]: " UPLOAD_CLOUD || true
-      UPLOAD_CLOUD=${UPLOAD_CLOUD:-Y}
+      if (( CLOUD_PERMISSION_DENIED )); then
+        echo "$CLOUD_CONNECTION_MESSAGE"
+        echo "Cloud uploads will be disabled until a full-access API key is configured."
+        UPLOAD_CLOUD="N"
+      else
+        echo "$CLOUD_CONNECTION_MESSAGE"
+        read -r -p "Upload LoRAs to cloud storage after training? [Y/n]: " UPLOAD_CLOUD || true
+        UPLOAD_CLOUD=${UPLOAD_CLOUD:-Y}
+      fi
     fi
   fi
 
