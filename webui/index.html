@@ -71,12 +71,30 @@
         cursor: pointer;
         color: var(--muted);
         font-size: 1rem;
+        outline: none;
       }
 
       #dropzone.active {
         background: rgba(138, 180, 248, 0.12);
         border-color: var(--accent-strong);
         color: var(--text);
+      }
+
+      #dropzone:focus-visible {
+        border-color: var(--accent-strong);
+        box-shadow: 0 0 0 3px rgba(138, 180, 248, 0.25);
+        color: var(--text);
+      }
+
+      #fileInput {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        border: 0;
+        clip: rect(0, 0, 0, 0);
+        overflow: hidden;
       }
 
       #upload-summary {
@@ -224,11 +242,11 @@
     <main>
       <section>
         <h2>1. Upload dataset files</h2>
-        <div id="dropzone">
+        <div id="dropzone" role="button" tabindex="0" aria-controls="upload-summary" aria-describedby="dropzone-instructions">
           <strong>Drop images, videos, and caption files here</strong>
-          <div>or click to browse from your machine.</div>
+          <div id="dropzone-instructions">or click to browse from your machine.</div>
         </div>
-        <input id="fileInput" type="file" multiple hidden />
+        <input id="fileInput" type="file" multiple />
         <div id="upload-summary">Files will be saved to /workspace/musubi-tuner/dataset/.</div>
       </section>
 
@@ -418,13 +436,38 @@
       }
 
       dropzone.addEventListener('click', () => fileInput.click());
-
-      dropzone.addEventListener('dragover', (event) => {
-        event.preventDefault();
-        dropzone.classList.add('active');
+      dropzone.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          fileInput.click();
+        }
       });
 
-      dropzone.addEventListener('dragleave', () => {
+      ['dragenter', 'dragover'].forEach((type) => {
+        dropzone.addEventListener(type, (event) => {
+          event.preventDefault();
+          event.dataTransfer.dropEffect = 'copy';
+          dropzone.classList.add('active');
+        });
+      });
+
+      dropzone.addEventListener('dragleave', (event) => {
+        if (!dropzone.contains(event.relatedTarget)) {
+          dropzone.classList.remove('active');
+        }
+      });
+
+      document.addEventListener('dragover', (event) => {
+        event.preventDefault();
+      });
+
+      document.addEventListener('drop', (event) => {
+        if (!dropzone.contains(event.target)) {
+          event.preventDefault();
+        }
+      });
+
+      dropzone.addEventListener('mouseleave', () => {
         dropzone.classList.remove('active');
       });
 
