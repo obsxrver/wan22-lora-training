@@ -5,7 +5,7 @@ import re
 import shutil
 from collections import deque
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse, StreamingResponse
@@ -26,13 +26,23 @@ STEP_PATTERNS = [
     re.compile(r"Iteration\s+(\d+)"),
     re.compile(r"steps:.*\|\s*(\d+)\s*/"),
 ]
+EPOCH_PATTERNS = [
+    re.compile(r"Epoch\s*\[(\d+)(?:/(\d+))?\]"),
+    re.compile(r"Epoch\s+(\d+)(?:\s*/\s*(\d+))?"),
+    re.compile(r"Epoch\s+(\d+):"),
+    re.compile(r"epoch(?:=|:)\s*(\d+)(?:\s*/\s*(\d+))?"),
+]
 LOSS_PATTERNS = [
     re.compile(r"train_loss(?:=|:)\s*([0-9]+(?:\.[0-9]+)?(?:[eE][-+]?\d+)?)"),
     re.compile(r"loss(?:=|:)\s*([0-9]+(?:\.[0-9]+)?(?:[eE][-+]?\d+)?)"),
     re.compile(r"Loss\s*=?\s*([0-9]+(?:\.[0-9]+)?(?:[eE][-+]?\d+)?)"),
 ]
-# we are parsing lines in /workspace/musubi-tuner/ruh_high.log and /workspace/musubi-tuner/run_low.log that look like this:
+# we are parsing lines in /workspace/musubi-tuner/run_high.log and /workspace/musubi-tuner/run_low.log that look like this:
 # steps:   1%|          | 30/5200 [01:38<4:43:19,  3.29s/it, avr_loss=0.129]
+TOTAL_STEP_PATTERNS = [
+    re.compile(r"steps:.*\|\s*\d+\s*/\s*(\d+)")
+]
+TIME_PATTERN = re.compile(r"\[(\d{1,2}:\d{2}(?::\d{2})?)<\s*(\d{1,2}:\d{2}(?::\d{2})?)")
 MAX_HISTORY_POINTS = 2000
 MAX_LOG_LINES = 400
 
@@ -78,7 +88,7 @@ class TrainingState:
         self.status: str = "idle"
         self.running: bool = False
         self.history: Dict[str, List[Dict[str, float]]] = {"high": [], "low": []}
-        self.current: Dict[str, Optional[Dict[str, float]]] = {"high": None, "low": None}
+        self.current: Dict[str, Optional[Dict[str, Any]]] = {"high": None, "low": None}
         self.pending: Dict[str, Dict[str, Optional[float]]] = {
             "high": {"step": None, "loss": None},
             "low": {"step": None, "loss": None},
@@ -120,11 +130,11 @@ class TrainingState:
             "running": self.running,
             "high": {
                 "history": list(self.history["high"]),
-                "current": self.current["high"],
+                "current": dict(self.current["high"]) if self.current["high"] else None,
             },
             "low": {
                 "history": list(self.history["low"]),
-                "current": self.current["low"],
+                "current": dict(self.current["low"]) if self.current["low"] else None,
             },
             "logs": list(self.logs),
         }
@@ -142,25 +152,87 @@ class TrainingState:
     def append_log(self, line: str) -> None:
         self.logs.append(line.rstrip())
 
-    async def update_metrics(self, run: str, step: Optional[int], loss: Optional[float]) -> Optional[Dict[str, float]]:
+    async def update_metrics(self, run: str, metrics: Dict[str, Optional[Any]]) -> Optional[Dict[str, Optional[Dict[str, Any]]]]:
         entry = self.pending[run]
-        if step is not None:
-            entry["step"] = int(step)
-        if loss is not None:
-            entry["loss"] = float(loss)
-        if entry["step"] is None or entry["loss"] is None:
-            return None
-        point = {"step": int(entry["step"]), "loss": float(entry["loss"])}
+        changed = False
+        current = dict(self.current[run]) if self.current[run] else {}
+
+        step_value = metrics.get("step")
+        if step_value is not None:
+            step_int = int(step_value)
+            if entry["step"] != step_int:
+                entry["step"] = step_int
+            if current.get("step") != step_int:
+                current["step"] = step_int
+                changed = True
+
+        loss_value = metrics.get("loss")
+        if loss_value is not None:
+            loss_float = float(loss_value)
+            if entry["loss"] != loss_float:
+                entry["loss"] = loss_float
+
+        total_steps = metrics.get("total_steps")
+        if total_steps is not None:
+            total_int = int(total_steps)
+            if current.get("total_steps") != total_int:
+                current["total_steps"] = total_int
+                changed = True
+
+        epoch_value = metrics.get("epoch")
+        if epoch_value is not None:
+            epoch_int = int(epoch_value)
+            if current.get("epoch") != epoch_int:
+                current["epoch"] = epoch_int
+                changed = True
+
+        total_epochs = metrics.get("total_epochs")
+        if total_epochs is not None:
+            total_epochs_int = int(total_epochs)
+            if current.get("total_epochs") != total_epochs_int:
+                current["total_epochs"] = total_epochs_int
+                changed = True
+
+        elapsed = metrics.get("time_elapsed")
+        if elapsed is not None and current.get("time_elapsed") != elapsed:
+            current["time_elapsed"] = str(elapsed)
+            changed = True
+
+        remaining = metrics.get("time_remaining")
+        if remaining is not None and current.get("time_remaining") != remaining:
+            current["time_remaining"] = str(remaining)
+            changed = True
+
+        point: Optional[Dict[str, Any]] = None
         history = self.history[run]
-        if history and history[-1]["step"] == point["step"]:
-            history[-1] = point
+        if entry["step"] is not None and entry["loss"] is not None:
+            point = {"step": int(entry["step"]), "loss": float(entry["loss"])}
+            if current.get("step") != point["step"] or current.get("loss") != point["loss"]:
+                changed = True
+            current["step"] = point["step"]
+            current["loss"] = point["loss"]
+            if history and history[-1]["step"] == point["step"]:
+                if history[-1].get("loss") != point["loss"]:
+                    history[-1] = point
+                    changed = True
+            else:
+                history.append(point)
+                changed = True
+                if len(history) > MAX_HISTORY_POINTS:
+                    del history[: len(history) - MAX_HISTORY_POINTS]
+            self.current[run] = current
+            entry["loss"] = None
         else:
-            history.append(point)
-            if len(history) > MAX_HISTORY_POINTS:
-                del history[: len(history) - MAX_HISTORY_POINTS]
-        self.current[run] = point
-        entry["loss"] = None
-        return point
+            if current:
+                if not self.current[run] or current != self.current[run]:
+                    changed = True
+                self.current[run] = current
+
+        if not changed and point is None:
+            return None
+
+        current_snapshot = dict(self.current[run]) if self.current[run] else None
+        return {"point": point, "current": current_snapshot}
 
 
 event_manager = EventManager()
@@ -231,9 +303,14 @@ async def stream_process_output(process: asyncio.subprocess.Process) -> None:
             await event_manager.publish({"type": "log", "line": decoded})
 
 
-def parse_metrics(line: str) -> Dict[str, Optional[float]]:
+def parse_metrics(line: str) -> Dict[str, Optional[Any]]:
     step_value: Optional[int] = None
     loss_value: Optional[float] = None
+    total_steps: Optional[int] = None
+    epoch_value: Optional[int] = None
+    total_epochs: Optional[int] = None
+    elapsed_time: Optional[str] = None
+    remaining_time: Optional[str] = None
     for pattern in STEP_PATTERNS:
         match = pattern.search(line)
         if match:
@@ -250,7 +327,43 @@ def parse_metrics(line: str) -> Dict[str, Optional[float]]:
             except ValueError:
                 loss_value = None
             break
-    return {"step": step_value, "loss": loss_value}
+    for pattern in TOTAL_STEP_PATTERNS:
+        match = pattern.search(line)
+        if match:
+            try:
+                total_steps = int(match.group(1))
+            except ValueError:
+                total_steps = None
+            break
+    for pattern in EPOCH_PATTERNS:
+        match = pattern.search(line)
+        if match:
+            try:
+                epoch_value = int(match.group(1))
+            except (ValueError, TypeError):
+                epoch_value = None
+            total_group: Optional[str] = None
+            if match.lastindex and match.lastindex >= 2:
+                total_group = match.group(2)
+            if total_group is not None:
+                try:
+                    total_epochs = int(total_group)
+                except ValueError:
+                    total_epochs = None
+            break
+    time_match = TIME_PATTERN.search(line)
+    if time_match:
+        elapsed_time = time_match.group(1)
+        remaining_time = time_match.group(2)
+    return {
+        "step": step_value,
+        "loss": loss_value,
+        "total_steps": total_steps,
+        "epoch": epoch_value,
+        "total_epochs": total_epochs,
+        "time_elapsed": elapsed_time,
+        "time_remaining": remaining_time,
+    }
 
 
 async def monitor_log_file(path: Path, run: str) -> None:
@@ -265,13 +378,17 @@ async def monitor_log_file(path: Path, run: str) -> None:
                     handle.seek(position)
                     for line in handle:
                         metrics = parse_metrics(line)
-                        if metrics["step"] is None and metrics["loss"] is None:
+                        result = await training_state.update_metrics(run, metrics)
+                        if not result:
                             continue
-                        point = await training_state.update_metrics(run, metrics["step"], metrics["loss"])
+                        event: Dict[str, Any] = {"type": "metrics", "run": run}
+                        point = result.get("point")
+                        current = result.get("current")
                         if point:
-                            await event_manager.publish(
-                                {"type": "metrics", "run": run, "step": point["step"], "loss": point["loss"]}
-                            )
+                            event.update({"step": point["step"], "loss": point["loss"]})
+                        if current:
+                            event["current"] = current
+                        await event_manager.publish(event)
                     position = handle.tell()
             except OSError:
                 position = 0
@@ -283,13 +400,17 @@ async def monitor_log_file(path: Path, run: str) -> None:
                 handle.seek(position)
                 for line in handle:
                     metrics = parse_metrics(line)
-                    if metrics["step"] is None and metrics["loss"] is None:
+                    result = await training_state.update_metrics(run, metrics)
+                    if not result:
                         continue
-                    point = await training_state.update_metrics(run, metrics["step"], metrics["loss"])
+                    event: Dict[str, Any] = {"type": "metrics", "run": run}
+                    point = result.get("point")
+                    current = result.get("current")
                     if point:
-                        await event_manager.publish(
-                            {"type": "metrics", "run": run, "step": point["step"], "loss": point["loss"]}
-                        )
+                        event.update({"step": point["step"], "loss": point["loss"]})
+                    if current:
+                        event["current"] = current
+                    await event_manager.publish(event)
         except OSError:
             pass
 

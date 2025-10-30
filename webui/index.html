@@ -313,11 +313,19 @@
             <h3>High noise</h3>
             <p>Current step: <span id="highStep">-</span></p>
             <p>Current loss: <span id="highLoss">-</span></p>
+            <p>Epoch: <span id="highEpoch">-</span></p>
+            <p>Total steps: <span id="highTotalSteps">-</span></p>
+            <p>Time elapsed: <span id="highElapsed">-</span></p>
+            <p>Time remaining: <span id="highEta">-</span></p>
           </div>
           <div class="metric-card">
             <h3>Low noise</h3>
             <p>Current step: <span id="lowStep">-</span></p>
             <p>Current loss: <span id="lowLoss">-</span></p>
+            <p>Epoch: <span id="lowEpoch">-</span></p>
+            <p>Total steps: <span id="lowTotalSteps">-</span></p>
+            <p>Time elapsed: <span id="lowElapsed">-</span></p>
+            <p>Time remaining: <span id="lowEta">-</span></p>
           </div>
         </div>
         <canvas id="lossChart"></canvas>
@@ -344,13 +352,67 @@
       const startButton = document.getElementById('startButton');
       const highStepEl = document.getElementById('highStep');
       const highLossEl = document.getElementById('highLoss');
+      const highEpochEl = document.getElementById('highEpoch');
+      const highTotalStepsEl = document.getElementById('highTotalSteps');
+      const highElapsedEl = document.getElementById('highElapsed');
+      const highEtaEl = document.getElementById('highEta');
       const lowStepEl = document.getElementById('lowStep');
       const lowLossEl = document.getElementById('lowLoss');
+      const lowEpochEl = document.getElementById('lowEpoch');
+      const lowTotalStepsEl = document.getElementById('lowTotalSteps');
+      const lowElapsedEl = document.getElementById('lowElapsed');
+      const lowEtaEl = document.getElementById('lowEta');
       const stopButton = document.getElementById('stopButton');
       const logOutput = document.getElementById('logOutput');
 
       const MAX_LOG_LINES = 400;
       const logLines = [];
+
+      const runDisplays = {
+        high: {
+          step: highStepEl,
+          loss: highLossEl,
+          epoch: highEpochEl,
+          total: highTotalStepsEl,
+          elapsed: highElapsedEl,
+          eta: highEtaEl,
+        },
+        low: {
+          step: lowStepEl,
+          loss: lowLossEl,
+          epoch: lowEpochEl,
+          total: lowTotalStepsEl,
+          elapsed: lowElapsedEl,
+          eta: lowEtaEl,
+        },
+      };
+
+      function updateRunDisplay(run, current) {
+        const display = runDisplays[run];
+        if (!display) {
+          return;
+        }
+        const hasData = current && typeof current === 'object';
+        const stepValue = hasData && current.step != null ? current.step : '-';
+        const lossValue = hasData && current.loss != null && Number.isFinite(Number(current.loss))
+          ? Number(current.loss).toFixed(6)
+          : '-';
+        const totalValue = hasData && current.total_steps != null ? current.total_steps : '-';
+        const epochValue = hasData && current.epoch != null ? current.epoch : '-';
+        const totalEpochValue = hasData && current.total_epochs != null ? current.total_epochs : '-';
+        let epochDisplay = '-';
+        if (epochValue !== '-') {
+          epochDisplay = totalEpochValue !== '-' ? `${epochValue} / ${totalEpochValue}` : `${epochValue}`;
+        }
+        const elapsedValue = hasData && current.time_elapsed ? current.time_elapsed : '-';
+        const remainingValue = hasData && current.time_remaining ? current.time_remaining : '-';
+        display.step.textContent = stepValue;
+        display.loss.textContent = lossValue;
+        display.epoch.textContent = epochDisplay;
+        display.total.textContent = totalValue;
+        display.elapsed.textContent = elapsedValue;
+        display.eta.textContent = remainingValue;
+      }
 
       let chart;
       function initChart() {
@@ -414,10 +476,8 @@
           dataset.data = [];
         });
         chart.update('none');
-        highStepEl.textContent = '-';
-        highLossEl.textContent = '-';
-        lowStepEl.textContent = '-';
-        lowLossEl.textContent = '-';
+        updateRunDisplay('high', null);
+        updateRunDisplay('low', null);
         logLines.length = 0;
         logOutput.textContent = 'Waiting for training output…';
         stopButton.disabled = true;
@@ -525,30 +585,34 @@
           .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
       }
 
-      function updateMetric(run, point) {
+      function updateMetric(run, payload) {
         const datasetIndex = run === 'high' ? 0 : 1;
         const dataset = chart.data.datasets[datasetIndex];
-        if (!point) {
+        if (!payload) {
           return;
         }
-        const stepValue = Number(point.step);
-        const lossValue = Number(point.loss);
-        if (!Number.isFinite(stepValue) || !Number.isFinite(lossValue)) {
-          return;
+        let datasetUpdated = false;
+        const stepValue = Number(payload.step);
+        const lossValue = Number(payload.loss);
+        if (Number.isFinite(stepValue) && Number.isFinite(lossValue)) {
+          if (dataset.data.length && dataset.data[dataset.data.length - 1].x === stepValue) {
+            dataset.data[dataset.data.length - 1].y = lossValue;
+          } else {
+            dataset.data.push({ x: stepValue, y: lossValue });
+          }
+          datasetUpdated = true;
         }
-        if (dataset.data.length && dataset.data[dataset.data.length - 1].x === stepValue) {
-          dataset.data[dataset.data.length - 1].y = lossValue;
-        } else {
-          dataset.data.push({ x: stepValue, y: lossValue });
+        const currentData = payload.current ? { ...payload.current } : {};
+        if (!('step' in currentData) && Number.isFinite(stepValue)) {
+          currentData.step = stepValue;
         }
-        if (run === 'high') {
-          highStepEl.textContent = stepValue;
-          highLossEl.textContent = lossValue.toFixed(6);
-        } else {
-          lowStepEl.textContent = stepValue;
-          lowLossEl.textContent = lossValue.toFixed(6);
+        if (!('loss' in currentData) && Number.isFinite(lossValue)) {
+          currentData.loss = lossValue;
         }
-        chart.update('none');
+        updateRunDisplay(run, Object.keys(currentData).length ? currentData : null);
+        if (datasetUpdated) {
+          chart.update('none');
+        }
       }
 
       function applySnapshot(snapshot) {
@@ -557,16 +621,8 @@
         stopButton.disabled = !snapshot.running;
         applyHistory(0, snapshot.high?.history || []);
         applyHistory(1, snapshot.low?.history || []);
-        const highCurrent = snapshot.high?.current;
-        const lowCurrent = snapshot.low?.current;
-        if (highCurrent) {
-          highStepEl.textContent = highCurrent.step;
-          highLossEl.textContent = Number(highCurrent.loss).toFixed(6);
-        }
-        if (lowCurrent) {
-          lowStepEl.textContent = lowCurrent.step;
-          lowLossEl.textContent = Number(lowCurrent.loss).toFixed(6);
-        }
+        updateRunDisplay('high', snapshot.high?.current || null);
+        updateRunDisplay('low', snapshot.low?.current || null);
         chart.update('none');
         logLines.length = 0;
         (snapshot.logs || []).forEach((line) => logLines.push(line));
@@ -662,7 +718,7 @@
             }
             break;
           case 'metrics':
-            updateMetric(data.run, { step: data.step, loss: data.loss });
+            updateMetric(data.run, data);
             break;
           case 'log':
             updateLog(data.line);
