@@ -307,6 +307,9 @@ class TrainingState:
         epoch_value = metrics.get("epoch")
         if epoch_value is not None:
             epoch_int = int(epoch_value)
+            # Only update epoch if new value is greater (prevent resets)
+            current_epoch = current.get("epoch", 0)
+            epoch_int = max(current_epoch, epoch_int)
             if current.get("epoch") != epoch_int:
                 current["epoch"] = epoch_int
                 changed = True
