@@ -307,6 +307,12 @@ get_cpu_threads() {
 }
 
 prompt_for_valid_api_key() {
+  if (( AUTO_CONFIRM )); then
+    echo ""
+    echo "Auto-confirm is enabled; skipping Vast.ai API key prompt. Cloud features will remain disabled."
+    return 1
+  fi
+
   echo ""
   echo "Your Vast.ai API key is invalid or expired."
   echo "To get a valid API key with full permissions:"
@@ -514,7 +520,12 @@ main() {
   echo "WAN2.2 LoRA simple runner"
 
   if [[ -z "${TITLE_SUFFIX_INPUT:-}" ]]; then
-    read -r -p "Title suffix (default: mylora): " TITLE_SUFFIX || true
+    if (( AUTO_CONFIRM )); then
+      TITLE_SUFFIX="mylora"
+      echo "Title suffix (auto default): $TITLE_SUFFIX"
+    else
+      read -r -p "Title suffix (default: mylora): " TITLE_SUFFIX || true
+    fi
   else
     TITLE_SUFFIX="$TITLE_SUFFIX_INPUT"
     echo "Title suffix (auto): $TITLE_SUFFIX"
@@ -522,7 +533,12 @@ main() {
   TITLE_SUFFIX=${TITLE_SUFFIX:-mylora}
 
   if [[ -z "${AUTHOR_INPUT:-}" ]]; then
-    read -r -p "Author (default: authorName): " AUTHOR || true
+    if (( AUTO_CONFIRM )); then
+      AUTHOR="authorName"
+      echo "Author (auto default): $AUTHOR"
+    else
+      read -r -p "Author (default: authorName): " AUTHOR || true
+    fi
   else
     AUTHOR="$AUTHOR_INPUT"
     echo "Author (auto): $AUTHOR"
@@ -530,7 +546,12 @@ main() {
   AUTHOR=${AUTHOR:-authorName}
 
   if [[ -z "${DATASET_INPUT:-}" ]]; then
-    read -r -p "Dataset path (default: $DEFAULT_DATASET): " DATASET || true
+    if (( AUTO_CONFIRM )); then
+      DATASET="$DEFAULT_DATASET"
+      echo "Dataset path (auto default): $DATASET"
+    else
+      read -r -p "Dataset path (default: $DEFAULT_DATASET): " DATASET || true
+    fi
   else
     DATASET="$DATASET_INPUT"
     echo "Dataset path (auto): $DATASET"
@@ -544,7 +565,12 @@ main() {
   fi
 
   if [[ -z "${SAVE_EVERY_INPUT:-}" ]]; then
-    read -r -p "Save every N epochs (default: 100): " SAVE_EVERY || true
+    if (( AUTO_CONFIRM )); then
+      SAVE_EVERY=""
+      echo "Save every N epochs (auto default): 20"
+    else
+      read -r -p "Save every N epochs (default: 100): " SAVE_EVERY || true
+    fi
   else
     SAVE_EVERY="$SAVE_EVERY_INPUT"
     echo "Save every N epochs (auto): $SAVE_EVERY"
@@ -557,7 +583,12 @@ main() {
 
   echo ""
   if [[ -z "${CPU_THREADS_INPUT:-}" ]]; then
-    read -r -p "CPU threads per process (default: $DEFAULT_CPU_THREADS_PER_PROCESS): " CPU_THREADS_PER_PROCESS || true
+    if (( AUTO_CONFIRM )); then
+      CPU_THREADS_PER_PROCESS="$DEFAULT_CPU_THREADS_PER_PROCESS"
+      echo "CPU threads per process (auto default): $CPU_THREADS_PER_PROCESS"
+    else
+      read -r -p "CPU threads per process (default: $DEFAULT_CPU_THREADS_PER_PROCESS): " CPU_THREADS_PER_PROCESS || true
+    fi
   else
     CPU_THREADS_PER_PROCESS="$CPU_THREADS_INPUT"
     echo "CPU threads per process (auto): $CPU_THREADS_PER_PROCESS"
@@ -565,7 +596,12 @@ main() {
   CPU_THREADS_PER_PROCESS=${CPU_THREADS_PER_PROCESS:-$DEFAULT_CPU_THREADS_PER_PROCESS}
 
   if [[ -z "${MAX_WORKERS_INPUT:-}" ]]; then
-    read -r -p "Max data loader workers (default: $DEFAULT_MAX_DATA_LOADER_WORKERS): " MAX_DATA_LOADER_WORKERS || true
+    if (( AUTO_CONFIRM )); then
+      MAX_DATA_LOADER_WORKERS="$DEFAULT_MAX_DATA_LOADER_WORKERS"
+      echo "Max data loader workers (auto default): $MAX_DATA_LOADER_WORKERS"
+    else
+      read -r -p "Max data loader workers (default: $DEFAULT_MAX_DATA_LOADER_WORKERS): " MAX_DATA_LOADER_WORKERS || true
+    fi
   else
     MAX_DATA_LOADER_WORKERS="$MAX_WORKERS_INPUT"
     echo "Max data loader workers (auto): $MAX_DATA_LOADER_WORKERS"
@@ -602,8 +638,13 @@ main() {
   else
     if (( cloud_ready )); then
       echo "Cloud storage is configured in Vast.ai."
-      read -r -p "Upload LoRAs to cloud storage after training? [Y/n]: " UPLOAD_CLOUD || true
-      UPLOAD_CLOUD=${UPLOAD_CLOUD:-Y}
+      if (( AUTO_CONFIRM )); then
+        UPLOAD_CLOUD="Y"
+        echo "Upload LoRAs to cloud storage after training? [auto default: $UPLOAD_CLOUD]"
+      else
+        read -r -p "Upload LoRAs to cloud storage after training? [Y/n]: " UPLOAD_CLOUD || true
+        UPLOAD_CLOUD=${UPLOAD_CLOUD:-Y}
+      fi
     else
       if (( CLOUD_PERMISSION_DENIED )); then
         echo "$CLOUD_CONNECTION_MESSAGE"
@@ -611,8 +652,13 @@ main() {
         UPLOAD_CLOUD="N"
       else
         echo "$CLOUD_CONNECTION_MESSAGE"
-        read -r -p "Upload LoRAs to cloud storage after training? [Y/n]: " UPLOAD_CLOUD || true
-        UPLOAD_CLOUD=${UPLOAD_CLOUD:-Y}
+        if (( AUTO_CONFIRM )); then
+          UPLOAD_CLOUD="Y"
+          echo "Upload LoRAs to cloud storage after training? [auto default: $UPLOAD_CLOUD]"
+        else
+          read -r -p "Upload LoRAs to cloud storage after training? [Y/n]: " UPLOAD_CLOUD || true
+          UPLOAD_CLOUD=${UPLOAD_CLOUD:-Y}
+        fi
       fi
     fi
   fi
@@ -625,12 +671,22 @@ main() {
   else
     if [[ -n "${CONTAINER_ID:-}" ]] && command -v vastai >/dev/null 2>&1; then
       echo "Vast.ai instance management available."
-      read -r -p "Shut down this instance after training to save costs? [Y/n]: " SHUTDOWN_INSTANCE || true
-      SHUTDOWN_INSTANCE=${SHUTDOWN_INSTANCE:-Y}
+      if (( AUTO_CONFIRM )); then
+        SHUTDOWN_INSTANCE="Y"
+        echo "Shut down this instance after training to save costs? [auto default: $SHUTDOWN_INSTANCE]"
+      else
+        read -r -p "Shut down this instance after training to save costs? [Y/n]: " SHUTDOWN_INSTANCE || true
+        SHUTDOWN_INSTANCE=${SHUTDOWN_INSTANCE:-Y}
+      fi
     else
       echo "Vast.ai CLI not available or not running on Vast.ai instance."
-      read -r -p "Shut down this instance after training to save costs? [Y/n]: " SHUTDOWN_INSTANCE || true
-      SHUTDOWN_INSTANCE=${SHUTDOWN_INSTANCE:-Y}
+      if (( AUTO_CONFIRM )); then
+        SHUTDOWN_INSTANCE="Y"
+        echo "Shut down this instance after training to save costs? [auto default: $SHUTDOWN_INSTANCE]"
+      else
+        read -r -p "Shut down this instance after training to save costs? [Y/n]: " SHUTDOWN_INSTANCE || true
+        SHUTDOWN_INSTANCE=${SHUTDOWN_INSTANCE:-Y}
+      fi
     fi
   fi
 
