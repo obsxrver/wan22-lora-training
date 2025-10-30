@@ -170,6 +170,10 @@
         transform: translateY(-1px);
       }
 
+      .button-secondary {
+        background: linear-gradient(135deg, #ff8a80, #ff5252);
+      }
+
       #status-line {
         font-size: 1rem;
         font-weight: 600;
@@ -295,8 +299,9 @@
               Shut down instance after training
             </label>
           </div>
-          <div class="form-row">
+          <div class="form-row two-col">
             <button id="startButton" type="submit">Start training</button>
+            <button id="stopButton" type="button" class="button-secondary" disabled>Stop training</button>
           </div>
         </form>
       </section>
@@ -341,6 +346,7 @@
       const highLossEl = document.getElementById('highLoss');
       const lowStepEl = document.getElementById('lowStep');
       const lowLossEl = document.getElementById('lowLoss');
+      const stopButton = document.getElementById('stopButton');
       const logOutput = document.getElementById('logOutput');
 
       const MAX_LOG_LINES = 400;
@@ -414,6 +420,7 @@
         lowLossEl.textContent = '-';
         logLines.length = 0;
         logOutput.textContent = 'Waiting for training output…';
+        stopButton.disabled = true;
       }
 
       async function uploadFiles(fileList) {
@@ -547,6 +554,7 @@
       function applySnapshot(snapshot) {
         setStatus(snapshot.status ? snapshot.status.charAt(0).toUpperCase() + snapshot.status.slice(1) : 'Idle');
         startButton.disabled = !!snapshot.running;
+        stopButton.disabled = !snapshot.running;
         applyHistory(0, snapshot.high?.history || []);
         applyHistory(1, snapshot.low?.history || []);
         const highCurrent = snapshot.high?.current;
@@ -605,6 +613,7 @@
             throw new Error(error.detail || 'Failed to start training');
           }
           setMessage('Training started. Watching logs…');
+          stopButton.disabled = false;
         } catch (error) {
           startButton.disabled = false;
           setMessage(error.message || 'Failed to start training', true);
@@ -612,6 +621,24 @@
       }
 
       form.addEventListener('submit', startTraining);
+
+      async function stopTraining() {
+        stopButton.disabled = true;
+        setMessage('Stopping training…');
+        try {
+          const response = await fetch('/stop', { method: 'POST' });
+          if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            throw new Error(error.detail || 'Failed to stop training');
+          }
+          setMessage('Stop requested. Waiting for training to halt…');
+        } catch (error) {
+          setMessage(error.message || 'Failed to stop training', true);
+          stopButton.disabled = false;
+        }
+      }
+
+      stopButton.addEventListener('click', stopTraining);
 
       function handleEvent(event) {
         const data = event.data ? JSON.parse(event.data) : null;
@@ -623,10 +650,15 @@
           case 'status':
             setStatus(data.status ? data.status.charAt(0).toUpperCase() + data.status.slice(1) : 'Idle');
             startButton.disabled = !!data.running;
+            stopButton.disabled = !data.running;
             if (data.status === 'failed') {
               setMessage('Training failed. See logs for details.', true);
             } else if (data.status === 'completed') {
               setMessage('Training completed successfully.');
+            } else if (data.status === 'stopping') {
+              setMessage('Stop requested. Waiting for training to halt…');
+            } else if (data.status === 'stopped') {
+              setMessage('Training stopped by user.');
             }
             break;
           case 'metrics':

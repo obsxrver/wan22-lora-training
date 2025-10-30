@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import re
+import shutil
 from collections import deque
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -23,6 +24,7 @@ STEP_PATTERNS = [
     re.compile(r"global_step(?:=|:)\s*(\d+)"),
     re.compile(r"step(?:=|:)\s*(\d+)"),
     re.compile(r"Iteration\s+(\d+)"),
+    re.compile(r"steps:.*\|\s*(\d+)\s*/"),
 ]
 LOSS_PATTERNS = [
     re.compile(r"train_loss(?:=|:)\s*([0-9]+(?:\.[0-9]+)?(?:[eE][-+]?\d+)?)"),
@@ -82,6 +84,7 @@ class TrainingState:
         self.logs: deque[str] = deque(maxlen=MAX_LOG_LINES)
         self.stop_event: asyncio.Event = asyncio.Event()
         self.tasks: List[asyncio.Task] = []
+        self.stop_requested: bool = False
 
     def reset_for_start(self) -> None:
         self.history = {"high": [], "low": []}
@@ -93,6 +96,7 @@ class TrainingState:
         self.logs.clear()
         self.stop_event = asyncio.Event()
         self.tasks = []
+        self.stop_requested = False
 
     def mark_started(self, process: asyncio.subprocess.Process) -> None:
         self.reset_for_start()
@@ -104,6 +108,7 @@ class TrainingState:
         self.status = status
         self.running = False
         self.process = None
+        self.stop_requested = False
         if not self.stop_event.is_set():
             self.stop_event.set()
 
@@ -168,10 +173,31 @@ async def index() -> str:
     return INDEX_HTML_PATH.read_text(encoding="utf-8")
 
 
+def _clear_dataset_directory() -> None:
+    try:
+        if DATASET_ROOT.exists() and not DATASET_ROOT.is_dir():
+            raise HTTPException(status_code=500, detail="Dataset path is not a directory")
+        if not DATASET_ROOT.exists():
+            DATASET_ROOT.mkdir(parents=True, exist_ok=True)
+            return
+        for entry in DATASET_ROOT.iterdir():
+            try:
+                if entry.is_dir():
+                    shutil.rmtree(entry)
+                else:
+                    entry.unlink()
+            except FileNotFoundError:
+                continue
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to prepare dataset directory: {exc}") from exc
+    DATASET_ROOT.mkdir(parents=True, exist_ok=True)
+
+
 @app.post("/upload")
 async def upload(files: List[UploadFile] = File(...)) -> Dict:
     if not files:
         raise HTTPException(status_code=400, detail="No files provided")
+    _clear_dataset_directory()
     saved = []
     for file in files:
         filename = Path(file.filename).name
@@ -193,18 +219,14 @@ async def upload(files: List[UploadFile] = File(...)) -> Dict:
 async def stream_process_output(process: asyncio.subprocess.Process) -> None:
     if process.stdout is None:
         return
-    try:
-        while True:
-            line = await process.stdout.readline()
-            if not line:
-                break
-            decoded = line.decode("utf-8", errors="ignore").rstrip()
-            if decoded:
-                training_state.append_log(decoded)
-                await event_manager.publish({"type": "log", "line": decoded})
-    finally:
-        if process.stdout:
-            process.stdout.close()
+    while True:
+        line = await process.stdout.readline()
+        if not line:
+            break
+        decoded = line.decode("utf-8", errors="ignore").rstrip()
+        if decoded:
+            training_state.append_log(decoded)
+            await event_manager.publish({"type": "log", "line": decoded})
 
 
 def parse_metrics(line: str) -> Dict[str, Optional[float]]:
@@ -234,6 +256,9 @@ async def monitor_log_file(path: Path, run: str) -> None:
     while not training_state.stop_event.is_set():
         if path.exists():
             try:
+                size = path.stat().st_size
+                if size < position:
+                    position = 0
                 with path.open("r", encoding="utf-8", errors="ignore") as handle:
                     handle.seek(position)
                     for line in handle:
@@ -269,7 +294,10 @@ async def monitor_log_file(path: Path, run: str) -> None:
 
 async def wait_for_completion(process: asyncio.subprocess.Process) -> None:
     returncode = await process.wait()
-    status = "completed" if returncode == 0 else "failed"
+    if training_state.stop_requested:
+        status = "stopped"
+    else:
+        status = "completed" if returncode == 0 else "failed"
     training_state.mark_finished(status)
     summary = f"Training {status} (return code {returncode})"
     training_state.append_log(summary)
@@ -332,6 +360,34 @@ async def start_training(payload: TrainRequest) -> Dict:
     training_state.add_task(wait_task)
 
     return {"status": "started"}
+
+
+@app.post("/stop")
+async def stop_training() -> Dict:
+    if not training_state.running or training_state.process is None:
+        raise HTTPException(status_code=409, detail="No training process to stop")
+
+    process = training_state.process
+    training_state.stop_requested = True
+    training_state.status = "stopping"
+    training_state.append_log("Stop requested by user. Attempting to terminate training process…")
+    await event_manager.publish({"type": "log", "line": "Stop requested by user. Attempting to terminate training process…"})
+    await event_manager.publish({"type": "status", "status": "stopping", "running": True})
+
+    try:
+        process.terminate()
+    except ProcessLookupError:
+        pass
+
+    try:
+        await asyncio.wait_for(process.wait(), timeout=15)
+    except asyncio.TimeoutError:
+        try:
+            process.kill()
+        except ProcessLookupError:
+            pass
+
+    return {"status": "stopping"}
 
 
 @app.get("/status")
