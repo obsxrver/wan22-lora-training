@@ -143,9 +143,52 @@
         margin-top: 1.5rem;
       }
 
-      #dataset-preview-section h3 {
+      .dataset-preview-collapsible {
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 0.75rem 1rem 1rem;
+        background: rgba(255, 255, 255, 0.04);
+      }
+
+      .dataset-preview-collapsible summary {
+        list-style: none;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.25rem 0;
+      }
+
+      .dataset-preview-collapsible summary::-webkit-details-marker {
+        display: none;
+      }
+
+      .dataset-preview-collapsible summary:focus-visible {
+        outline: 2px solid rgba(138, 180, 248, 0.6);
+        border-radius: 8px;
+      }
+
+      .dataset-preview-collapsible summary::after {
+        content: '▾';
+        font-size: 0.9rem;
+        margin-left: auto;
+        color: var(--muted);
+        transition: transform 0.2s ease;
+      }
+
+      .dataset-preview-collapsible[open] summary::after {
+        transform: rotate(180deg);
+      }
+
+      .dataset-preview-collapsible h3 {
         margin: 0;
         font-size: 1.1rem;
+      }
+
+      .dataset-preview-hint {
+        margin: 0.5rem 0 1rem;
+        font-size: 0.85rem;
+        color: var(--muted);
       }
 
       #dataset-preview-message {
@@ -414,9 +457,17 @@
         <input id="fileInput" type="file" multiple />
         <div id="upload-summary">Files will be saved to /workspace/musubi-tuner/dataset/.</div>
         <div id="dataset-preview-section">
-          <h3>Current dataset</h3>
-          <div id="dataset-preview-message" aria-live="polite">No dataset files uploaded yet.</div>
-          <div id="dataset-grid" class="dataset-grid" role="list"></div>
+          <details class="dataset-preview-collapsible" open>
+            <summary>
+              <h3>Current dataset</h3>
+            </summary>
+            <p class="dataset-preview-hint">
+              Need captions? Try the SillyCaption tool from the navigation bar to auto-generate prompts for images that are still
+              missing descriptions before you start training.
+            </p>
+            <div id="dataset-preview-message" aria-live="polite">No dataset files uploaded yet.</div>
+            <div id="dataset-grid" class="dataset-grid" role="list"></div>
+          </details>
         </div>
       </section>
 
