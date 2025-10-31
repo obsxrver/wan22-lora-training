@@ -41,6 +41,42 @@
         color: var(--muted);
       }
 
+      .header-text {
+        max-width: 640px;
+        margin: 0 auto;
+      }
+
+      header .top-nav {
+        margin-top: 1.25rem;
+        display: flex;
+        justify-content: center;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+      }
+
+      .nav-link {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.6rem 1.2rem;
+        border-radius: 999px;
+        text-decoration: none;
+        font-weight: 600;
+        color: var(--text);
+        border: 1px solid transparent;
+        background: rgba(138, 180, 248, 0.15);
+        transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+      }
+
+      .nav-link:hover {
+        border-color: rgba(138, 180, 248, 0.4);
+        background: rgba(138, 180, 248, 0.25);
+      }
+
+      .nav-link--active {
+        border-color: rgba(166, 107, 255, 0.5);
+        background: rgba(166, 107, 255, 0.3);
+      }
+
       main {
         max-width: 1100px;
         margin: 0 auto;
@@ -359,8 +395,14 @@
   </head>
   <body>
     <header>
-      <h1>WAN 2.2 LoRA Training</h1>
-      <p>Upload your dataset, configure prompts, and launch training with live feedback.</p>
+      <div class="header-text">
+        <h1>WAN 2.2 LoRA Training</h1>
+        <p>Upload your dataset, configure prompts, and launch training with live feedback.</p>
+      </div>
+      <nav class="top-nav" aria-label="Main navigation">
+        <a href="/" class="nav-link nav-link--active" aria-current="page">Training UI</a>
+        <a href="/SillyCaption" class="nav-link">SillyCaption</a>
+      </nav>
     </header>
     <main>
       <section>
