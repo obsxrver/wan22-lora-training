@@ -2,13 +2,7 @@
   const el = (id) => document.getElementById(id);
 
   const api = {
-    endpoint: 'https://openrouter.ai/api/v1/chat/completions',
-    useCustomEndpoint: false,
-    customEndpoint: '',
-    customEndpointBase: '', // Store ip:port separately for model fetching
-    customBearerToken: '', // Bearer token for custom VLLM server
-    customUsername: '', // Username for Basic Auth
-    customPassword: '', // Password for Basic Auth
+    endpoint: 'https://openrouter.ai/api/v1/chat/completions'
   };
 
   const state = {
@@ -16,12 +10,8 @@
     running: false,
     models: [],
     openRouterModels: [], // Store OpenRouter models separately
-    isImageToImageMode: false,
-    vllmModels: [],
-    vllmConnectionStatus: 'disconnected', // 'disconnected', 'connecting', 'success', 'error'
     // Sequence guards to avoid race conditions between concurrent fetches
     openRouterFetchSeq: 0,
-    vllmFetchSeq: 0,
     currentItems: [],
     refreshSeq: 0,
   };
@@ -34,8 +24,6 @@
     modelId: el('modelId'),
     systemPrompt: el('systemPrompt'),
     files: el('files'),
-    outputFiles: el('outputFiles'),
-    outputFilesField: el('outputFilesField'),
     presetSelect: el('presetSelect'),
     presetName: el('presetName'),
     btnSavePreset: el('btnSavePreset'),
@@ -64,20 +52,8 @@
     sortOrder: el('sortOrder'),
     reasoningToggle: el('reasoningToggle'),
     reasoningToggleField: el('reasoningToggleField'),
-    modeToggle: el('modeToggle'),
     modeLabel: el('modeLabel'),
     modeDescription: el('modeDescription'),
-    useCustomVllm: el('useCustomVllm'),
-    customVllmEndpoint: el('customVllmEndpoint'),
-    customVllmField: el('customVllmField'),
-    customVllmBearerToken: el('customVllmBearerToken'),
-    customVllmBearerTokenField: el('customVllmBearerTokenField'),
-    customVllmUsername: el('customVllmUsername'),
-    customVllmUsernameField: el('customVllmBasicAuthField'),
-    customVllmPassword: el('customVllmPassword'),
-    customVllmPasswordField: el('customVllmPasswordField'),
-    vllmStatusIndicator: el('vllmStatusIndicator'),
-    vllmStatusTooltip: el('vllmStatusTooltip'),
   };
 
   // Persistent storage keys
@@ -89,12 +65,6 @@
     lastPreset: 'sc_last_preset',
     selectedModel: 'sc_selected_model',
     selectedModelOpenRouter: 'sc_selected_model_openrouter',
-    selectedModelLocal: 'sc_selected_model_local',
-    useCustomVllm: 'sc_use_custom_vllm',
-    customVllmEndpoint: 'sc_custom_vllm_endpoint',
-    customVllmBearerToken: 'sc_custom_vllm_bearer_token',
-    customVllmUsername: 'sc_custom_vllm_username',
-    customVllmPassword: 'sc_custom_vllm_password',
   };
 
   // Presets helpers
@@ -304,142 +274,6 @@ EXAMPLES:
       try { localStorage.setItem(storageKeys.apiKey, ui.apiKey.value); } catch { }
     });
 
-    // Custom VLLM settings
-    try {
-      const useCustom = localStorage.getItem(storageKeys.useCustomVllm);
-      if (useCustom !== null) {
-        api.useCustomEndpoint = useCustom === 'true';
-        if (ui.useCustomVllm) ui.useCustomVllm.checked = api.useCustomEndpoint;
-      }
-    } catch { }
-    try {
-      const customEndpointBase = localStorage.getItem(storageKeys.customVllmEndpoint);
-      if (customEndpointBase) {
-        // Check if it's the old full URL format or new ip:port format
-        if (customEndpointBase.startsWith('http://') || customEndpointBase.startsWith('https://')) {
-          // Old format - extract hostname:port part
-          try {
-            const url = new URL(customEndpointBase);
-            const hostnamePort = url.hostname + (url.port ? ':' + url.port : '');
-            api.customEndpointBase = hostnamePort;
-            if (ui.customVllmEndpoint) ui.customVllmEndpoint.value = hostnamePort;
-          } catch {
-            api.customEndpointBase = '';
-            if (ui.customVllmEndpoint) ui.customVllmEndpoint.value = '';
-          }
-        } else {
-          // New format - IP:port or domain format
-          api.customEndpointBase = customEndpointBase;
-          if (ui.customVllmEndpoint) ui.customVllmEndpoint.value = customEndpointBase;
-        }
-      }
-    } catch { }
-
-    // Custom VLLM bearer token persistence
-    try {
-      const customBearerToken = localStorage.getItem(storageKeys.customVllmBearerToken);
-      if (customBearerToken) {
-        api.customBearerToken = customBearerToken;
-        if (ui.customVllmBearerToken) ui.customVllmBearerToken.value = customBearerToken;
-      }
-    } catch { }
-
-    // Custom VLLM username persistence
-    try {
-      const customUsername = localStorage.getItem(storageKeys.customVllmUsername);
-      if (customUsername) {
-        api.customUsername = customUsername;
-        if (ui.customVllmUsername) ui.customVllmUsername.value = customUsername;
-      }
-    } catch { }
-
-    // Custom VLLM password persistence
-    try {
-      const customPassword = localStorage.getItem(storageKeys.customVllmPassword);
-      if (customPassword) {
-        api.customPassword = customPassword;
-        if (ui.customVllmPassword) ui.customVllmPassword.value = customPassword;
-      }
-    } catch { }
-
-    // Show/hide custom VLLM field based on toggle state
-    updateCustomVllmUI();
-
-    if (ui.useCustomVllm) {
-      ui.useCustomVllm.addEventListener('change', () => {
-        api.useCustomEndpoint = ui.useCustomVllm.checked;
-        updateCustomVllmUI();
-        try { localStorage.setItem(storageKeys.useCustomVllm, api.useCustomEndpoint); } catch { }
-
-        // Fetch VLLM models when enabling custom VLLM
-        if (api.useCustomEndpoint && api.customEndpointBase) {
-          fetchVllmModels();
-        } else if (!api.useCustomEndpoint) {
-          // When disabling VLLM, remove local models from the list
-          state.vllmModels = [];
-          state.vllmConnectionStatus = 'disconnected';
-          updateVllmStatusIndicator();
-          removeLocalModelsFromList();
-          ensurePreferredModelSelected();
-        }
-      });
-    }
-
-    // Check if VLLM should be initialized on load
-    if (api.useCustomEndpoint && api.customEndpointBase) {
-      fetchVllmModels();
-    }
-
-    if (ui.customVllmEndpoint) {
-      ui.customVllmEndpoint.addEventListener('input', () => {
-        const ipPort = ui.customVllmEndpoint.value.trim();
-        // Don't update the stored endpoint until it's valid and we're using custom VLLM
-        if (api.useCustomEndpoint && ipPort) {
-          // Accept IP:port, domain, or full URL formats
-          const endpointPattern = /^((https?:\/\/)?[a-zA-Z0-9.-]+(\:[0-9]+)?|[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+)$/;
-          if (endpointPattern.test(ipPort)) {
-            api.customEndpointBase = ipPort;
-            try { localStorage.setItem(storageKeys.customVllmEndpoint, ipPort); } catch { }
-            // Fetch models when endpoint changes
-            fetchVllmModels();
-          }
-        }
-      });
-    }
-
-    if (ui.customVllmBearerToken) {
-      ui.customVllmBearerToken.addEventListener('input', () => {
-        const token = ui.customVllmBearerToken.value.trim();
-        // Update the stored bearer token when it changes
-        if (api.useCustomEndpoint) {
-          api.customBearerToken = token;
-          try { localStorage.setItem(storageKeys.customVllmBearerToken, token); } catch { }
-        }
-      });
-    }
-
-    if (ui.customVllmUsername) {
-      ui.customVllmUsername.addEventListener('input', () => {
-        const username = ui.customVllmUsername.value.trim();
-        // Update the stored username when it changes
-        if (api.useCustomEndpoint) {
-          api.customUsername = username;
-          try { localStorage.setItem(storageKeys.customVllmUsername, username); } catch { }
-        }
-      });
-    }
-
-    if (ui.customVllmPassword) {
-      ui.customVllmPassword.addEventListener('input', () => {
-        const password = ui.customVllmPassword.value.trim();
-        // Update the stored password when it changes
-        if (api.useCustomEndpoint) {
-          api.customPassword = password;
-          try { localStorage.setItem(storageKeys.customVllmPassword, password); } catch { }
-        }
-      });
-    }
-
     // Presets
     let presets = loadPresets();
     if (!presets || presets.length === 0) {
@@ -449,7 +283,6 @@ EXAMPLES:
     let selectedName = null;
     try { selectedName = localStorage.getItem(storageKeys.lastPreset) || null; } catch { }
     renderPresetOptions(presets, selectedName);
-
     if (selectedName) {
       const found = presets.find((p) => p.name === selectedName);
       if (found) {
@@ -457,7 +290,6 @@ EXAMPLES:
         if (ui.presetName) ui.presetName.value = found.name;
       }
     }
-
     if (ui.presetSelect) {
       ui.presetSelect.addEventListener('change', () => {
         const name = ui.presetSelect.value;
@@ -510,7 +342,6 @@ EXAMPLES:
     if (ui.btnCaptionUncaptioned) ui.btnCaptionUncaptioned.disabled = running;
     ui.btnCancel.disabled = !running;
     ui.files.disabled = running;
-    if (ui.outputFiles) ui.outputFiles.disabled = running;
     ui.modelId.disabled = running;
     if (ui.btnClearAllCaptions) ui.btnClearAllCaptions.disabled = running;
   }
@@ -523,10 +354,7 @@ EXAMPLES:
     ui.progressText.className = '';
     ui.files.value = '';
     ui.files.classList.remove('processing');
-    if (ui.outputFiles) {
-      ui.outputFiles.value = '';
-      ui.outputFiles.classList.remove('processing');
-    }
+    
     state.currentItems = [];
     state.refreshSeq = 0;
     resultsStore.clear();
@@ -558,7 +386,6 @@ EXAMPLES:
     ui.progressText.textContent = 'Cancelled';
     ui.progressText.className = 'error';
     ui.files.classList.remove('processing');
-    if (ui.outputFiles) ui.outputFiles.classList.remove('processing');
   });
 
   // --- OAuth (PKCE) integration ---
@@ -630,19 +457,6 @@ EXAMPLES:
     return api.endpoint;
   }
 
-  function getVllmModelsEndpoint() {
-    if (api.useCustomEndpoint && api.customEndpointBase) {
-      if (api.customEndpointBase.startsWith('http://') || api.customEndpointBase.startsWith('https://')) {
-        // Full URL provided, use as-is and append models path
-        return `${api.customEndpointBase}/v1/models`;
-      } else {
-        // IP:port or domain format, use http protocol
-        return `http://${api.customEndpointBase}/v1/models`;
-      }
-    }
-    return null;
-  }
-
   function signOut() {
     try { localStorage.removeItem(storageKeys.oauthKey); } catch { }
     updateAuthUI();
@@ -690,7 +504,6 @@ EXAMPLES:
     const seq = ++state.refreshSeq;
 
     const inputFiles = Array.from(ui.files.files || []);
-    const outputFiles = state.isImageToImageMode ? Array.from(ui.outputFiles?.files || []) : [];
 
     if (inputFiles.length === 0) {
       if (seq !== state.refreshSeq) return;
@@ -709,7 +522,7 @@ EXAMPLES:
     ui.progressBar.value = 0;
 
     try {
-      const { items, captionMap } = await buildItemsFromFiles(inputFiles, outputFiles);
+      const { items, captionMap } = await buildItemsFromFiles(inputFiles);
       if (seq !== state.refreshSeq) return;
       state.currentItems = items;
       ui.results.innerHTML = '';
@@ -747,7 +560,7 @@ EXAMPLES:
     }
   }
 
-  async function buildItemsFromFiles(inputFiles, outputFiles) {
+  async function buildItemsFromFiles(inputFiles) {
     const captionMap = new Map();
     const mediaInputs = [];
 
@@ -765,47 +578,10 @@ EXAMPLES:
       }
     }
 
-    const outputMediaMap = new Map();
-    if (state.isImageToImageMode && outputFiles && outputFiles.length > 0) {
-      for (const file of outputFiles) {
-        if (isText(file)) {
-          try {
-            const text = (await readFileAsText(file)).replace(/^\uFEFF/, '');
-            const base = getBaseFilename(file.name).toLowerCase();
-            if (!captionMap.has(base)) {
-              captionMap.set(base, text);
-            }
-          } catch (error) {
-            console.warn('Failed to read caption file', file?.name, error);
-          }
-          continue;
-        }
-        if (!isImage(file)) continue;
-        const dataUrl = await readFileAsDataURL(file);
-        outputMediaMap.set(getBaseFilename(file.name).toLowerCase(), { dataUrl, name: file.name });
-      }
-    }
 
     const items = [];
 
     for (const file of mediaInputs) {
-      if (state.isImageToImageMode && isImage(file)) {
-        const base = getBaseFilename(file.name);
-        const outputMatch = outputMediaMap.get(base.toLowerCase());
-        if (outputMatch) {
-          const inputDataUrl = await readFileAsDataURL(file);
-          items.push({
-            kind: 'image-pair',
-            name: base,
-            inputName: file.name,
-            outputName: outputMatch.name,
-            inputDataUrl,
-            outputDataUrl: outputMatch.dataUrl,
-            type: 'image-pair',
-          });
-          continue;
-        }
-      }
 
       if (isImage(file)) {
         const dataUrl = await readFileAsDataURL(file);
@@ -819,7 +595,6 @@ EXAMPLES:
   }
 
   ui.files?.addEventListener('change', () => { refreshItemsFromFiles(); });
-  ui.outputFiles?.addEventListener('change', () => { refreshItemsFromFiles(); });
 
   function getCardText(card) {
     if (!card) return '';
@@ -843,23 +618,6 @@ EXAMPLES:
       return;
     }
 
-    if (api.useCustomEndpoint) {
-      if (!api.customEndpointBase) {
-        alert('Please enter a VLLM server IP:port.');
-        return;
-      }
-      const endpointPattern = /^((https?:\/\/)?[a-zA-Z0-9.-]+(\:[0-9]+)?|[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+)$/;
-      if (!endpointPattern.test(api.customEndpointBase)) {
-        alert('Please enter a valid endpoint format (e.g., 192.168.1.100:8000, example.com, or https://example.com).');
-        return;
-      }
-      if (api.customEndpointBase.startsWith('http://') || api.customEndpointBase.startsWith('https://')) {
-        api.customEndpoint = `${api.customEndpointBase}/v1/chat/completions`;
-      } else {
-        api.customEndpoint = `http://${api.customEndpointBase}/v1/chat/completions`;
-      }
-    }
-
     const systemPrompt = ui.systemPrompt.value.trim();
     if (!systemPrompt) {
       alert('Please enter a system prompt.');
@@ -867,18 +625,11 @@ EXAMPLES:
     }
 
     const inputFiles = Array.from(ui.files?.files || []);
-    const outputFiles = state.isImageToImageMode ? Array.from(ui.outputFiles?.files || []) : [];
 
     if (inputFiles.length === 0) {
       alert('Please select at least one input image or video file.');
       return;
     }
-
-    if (state.isImageToImageMode && outputFiles.length === 0) {
-      alert('Please select output images for image-to-image mode.');
-      return;
-    }
-
     if (!state.currentItems || state.currentItems.length === 0) {
       await refreshItemsFromFiles();
     }
@@ -907,7 +658,6 @@ EXAMPLES:
 
     setRunning(true);
     ui.files.classList.add('processing');
-    if (ui.outputFiles) ui.outputFiles.classList.add('processing');
     state.abortController = new AbortController();
 
     ui.progressText.className = 'processing';
@@ -961,7 +711,6 @@ EXAMPLES:
     } finally {
       if (limiter && typeof limiter.dispose === 'function') limiter.dispose();
       ui.files.classList.remove('processing');
-      if (ui.outputFiles) ui.outputFiles.classList.remove('processing');
       setRunning(false);
       state.abortController = null;
     }
@@ -987,198 +736,6 @@ EXAMPLES:
   }
 
 
-  function updateModeUI() {
-    if (state.isImageToImageMode) {
-      ui.modeLabel.textContent = 'Image-to-Image';
-      ui.modeDescription.textContent = 'Upload matching input and output images to generate transformation captions';
-    } else {
-      ui.modeLabel.textContent = 'Text-to-Image';
-      ui.modeDescription.textContent = 'Generate captions describing images';
-    }
-  }
-
-  function updateCustomVllmUI() {
-    if (ui.customVllmField) {
-      ui.customVllmField.style.display = api.useCustomEndpoint ? 'block' : 'none';
-    }
-    if (ui.customVllmBearerTokenField) {
-      ui.customVllmBearerTokenField.style.display = api.useCustomEndpoint ? 'block' : 'none';
-    }
-    if (ui.customVllmUsernameField) {
-      ui.customVllmUsernameField.style.display = api.useCustomEndpoint ? 'block' : 'none';
-    }
-    if (ui.customVllmPasswordField) {
-      ui.customVllmPasswordField.style.display = api.useCustomEndpoint ? 'block' : 'none';
-    }
-    updateVllmStatusIndicator();
-  }
-
-  function updateVllmStatusIndicator() {
-    if (!ui.vllmStatusIndicator || !ui.vllmStatusTooltip) return;
-
-    // Remove all status classes
-    ui.vllmStatusIndicator.classList.remove('success', 'error', 'hidden');
-
-    switch (state.vllmConnectionStatus) {
-      case 'success':
-        ui.vllmStatusIndicator.classList.add('success');
-        ui.vllmStatusTooltip.textContent = 'VLLM server connected successfully';
-        break;
-      case 'error':
-        ui.vllmStatusIndicator.classList.add('error');
-        ui.vllmStatusTooltip.textContent = 'Failed to connect to VLLM server, defaulting to OpenRouter';
-        break;
-      case 'connecting':
-        ui.vllmStatusIndicator.classList.add('hidden');
-        ui.vllmStatusTooltip.textContent = 'Connecting to VLLM server...';
-        break;
-      default:
-        ui.vllmStatusIndicator.classList.add('hidden');
-        ui.vllmStatusTooltip.textContent = 'VLLM server disconnected';
-        break;
-    }
-  }
-
-  async function fetchVllmModels() {
-    if (!api.useCustomEndpoint || !api.customEndpointBase) return;
-
-    const seq = ++state.vllmFetchSeq;
-    const modelsUrl = getVllmModelsEndpoint();
-    if (!modelsUrl) return;
-
-    state.vllmConnectionStatus = 'connecting';
-    updateVllmStatusIndicator();
-
-    try {
-      const headers = {
-        'Content-Type': 'application/json',
-      };
-
-      // Add authentication headers
-      if (api.useCustomEndpoint) {
-        if (api.customUsername && api.customPassword) {
-          // Use Basic Auth if username and password are provided
-          const credentials = btoa(`${api.customUsername}:${api.customPassword}`);
-          headers['Authorization'] = `Basic ${credentials}`;
-        } else if (api.customBearerToken) {
-          // Fall back to Bearer token if no Basic Auth credentials
-          headers['Authorization'] = `Bearer ${api.customBearerToken}`;
-        }
-      }
-
-      const response = await fetch(modelsUrl, {
-        method: 'GET',
-        headers,
-        signal: AbortSignal.timeout(5000), // 5 second timeout
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      if (seq !== state.vllmFetchSeq) {
-        return; // stale result
-      }
-      const models = data.data || [];
-
-      // Filter to only include models that support image inputs (similar to OpenRouter filtering)
-      state.vllmModels = models
-        .filter(model => {
-          return model.id && 
-            model.object === 'model';
-        })
-        .map((model, index) => ({
-          ...model,
-          originalIndex: index,
-          name: model.name || model.id,
-          id: model.id,
-          // Add supported_parameters for compatibility with reasoning check
-          supported_parameters: model.supported_parameters || [],
-          // Add architecture info for compatibility
-          architecture: model.architecture || { input_modalities: ['image'] }
-        }));
-
-      if (state.vllmModels.length > 0) {
-        state.vllmConnectionStatus = 'success';
-        updateVllmStatusIndicator();
-        // Merge local models into list and ensure selection
-        addLocalModelsToList();
-        ensurePreferredModelSelected();
-      } else {
-        throw new Error('No suitable models found on VLLM server');
-      }
-    } catch (error) {
-      console.error('Failed to fetch VLLM models:', error);
-      state.vllmConnectionStatus = 'error';
-      state.vllmModels = [];
-      updateVllmStatusIndicator();
-      // Remove any local models from the list
-      removeLocalModelsFromList();
-      ensurePreferredModelSelected();
-    }
-  }
-
-  function addLocalModelsToList() {
-    // Remove any existing local models first
-    removeLocalModelsFromList();
-    
-    // Add local models with "(local)" suffix
-    const localModelsWithSuffix = state.vllmModels.map((model, index) => ({
-      ...model,
-      id: model.id, // Keep original ID for API calls
-      name: `${model.name || model.id} (local)`,
-      displayName: `${model.name || model.id} (local)`,
-      isLocal: true,
-      originalIndex: state.openRouterModels.length + index // Position after OpenRouter models
-    }));
-    
-    // Merge with OpenRouter models
-    state.models = [...state.openRouterModels, ...localModelsWithSuffix];
-    renderModelOptions();
-    
-    // Try to restore the previously selected model
-    const savedModel = localStorage.getItem(storageKeys.selectedModelLocal) || localStorage.getItem(storageKeys.selectedModel);
-    if (savedModel && state.models.some(m => m.id === savedModel)) {
-      selectModel(savedModel);
-    }
-  }
-
-  function removeLocalModelsFromList() {
-    // Remove all local models from the list
-    state.models = state.models.filter(m => !m.isLocal);
-    renderModelOptions();
-    
-    // If current selected model is local, switch to a non-local model
-    const currentModel = ui.modelId.value;
-    const currentModelObj = state.models.find(m => m.id === currentModel);
-    if (!currentModelObj || currentModelObj.isLocal) {
-      // Switch to saved OpenRouter model or first OpenRouter
-      const savedOpenRouter = localStorage.getItem(storageKeys.selectedModelOpenRouter) || localStorage.getItem(storageKeys.selectedModel);
-      if (savedOpenRouter && state.models.some(m => m.id === savedOpenRouter && !m.isLocal)) {
-        selectModel(savedOpenRouter);
-      } else if (state.openRouterModels.length > 0) {
-        selectModel(state.openRouterModels[0].id);
-      } else if (state.models.length > 0) {
-        selectModel(state.models[0].id);
-      }
-    }
-  }
-
-  function recomputeCombinedModels() {
-    // Combine OpenRouter and currently fetched local models
-    const localModelsWithSuffix = state.vllmModels.map((model, index) => ({
-      ...model,
-      id: model.id,
-      name: `${model.name || model.id} (local)`,
-      displayName: `${model.name || model.id} (local)`,
-      isLocal: true,
-      originalIndex: state.openRouterModels.length + index
-    }));
-    state.models = [...state.openRouterModels, ...(api.useCustomEndpoint ? localModelsWithSuffix : [])];
-    renderModelOptions();
-  }
-
   function ensurePreferredModelSelected() {
     // 1) If user has a selected model and it exists, keep it
     const current = ui.modelId.value;
@@ -1186,13 +743,8 @@ EXAMPLES:
       return;
     }
     // 2) Prefer provider-specific saved selection
-    const savedLocal = localStorage.getItem(storageKeys.selectedModelLocal);
-    if (api.useCustomEndpoint && savedLocal && state.models.some(m => m.id === savedLocal)) {
-      selectModel(savedLocal);
-      return;
-    }
     const savedOR = localStorage.getItem(storageKeys.selectedModelOpenRouter);
-    if ((!api.useCustomEndpoint || !savedLocal) && savedOR && state.models.some(m => m.id === savedOR)) {
+    if (savedOR && state.models.some(m => m.id === savedOR)) {
       selectModel(savedOR);
       return;
     }
@@ -1202,39 +754,13 @@ EXAMPLES:
       selectModel(defaultModel);
       return;
     }
-    // 4) Otherwise pick first available from current provider preference
-    if (api.useCustomEndpoint) {
-      const firstLocal = state.models.find(m => m.isLocal);
-      if (firstLocal) { selectModel(firstLocal.id); return; }
-    }
     // 5) Fallback to first OpenRouter or first model
-    if (state.openRouterModels.length > 0) {
-      selectModel(state.openRouterModels[0].id);
-    } else if (state.models.length > 0) {
+    if (state.models.length > 0) {
       selectModel(state.models[0].id);
     }
   }
 
-  function handleModeToggle() {
-    state.isImageToImageMode = ui.modeToggle.checked;
-    updateModeUI();
-
-    // Show/hide output files field based on mode
-    if (ui.outputFilesField) {
-      ui.outputFilesField.style.display = state.isImageToImageMode ? 'block' : 'none';
-    }
-
-    // Clear current results when switching modes
-    ui.results.innerHTML = '';
-    updateSaveZipButton();
-
-    // Reload presets while preserving the current selection
-    const presets = loadPresets() || defaultPresets();
-    const currentSelection = ui.presetSelect?.value || '';
-    const savedPreset = localStorage.getItem(storageKeys.lastPreset) || '';
-    const presetToSelect = currentSelection || savedPreset;
-    renderPresetOptions(presets, presetToSelect);
-  }
+ 
 
   function readFileAsDataURL(file) {
     return new Promise((resolve, reject) => {
@@ -1962,7 +1488,7 @@ Instructions: ${systemPrompt}`;
         return; // stale result
       }
       // Filter to only include models that support image inputs and store original order
-      state.openRouterModels = data.data
+      state.models = data.data
         .filter(model => {
           return model.architecture &&
             model.architecture.input_modalities &&
@@ -1973,10 +1499,6 @@ Instructions: ${systemPrompt}`;
           originalIndex: index, // Store original chronological order
           isLocal: false
         }));
-      
-      // Initialize state.models with OpenRouter models
-      // Local models will be added later if VLLM is enabled
-      recomputeCombinedModels();
       ensurePreferredModelSelected();
     } catch (error) {
       console.error('Failed to fetch models:', error);
@@ -2066,11 +1588,6 @@ Instructions: ${systemPrompt}`;
     if (selectedOption) {
       selectedOption.classList.add('selected');
       localStorage.setItem(storageKeys.selectedModel, model.id);
-      if (model.isLocal) {
-        localStorage.setItem(storageKeys.selectedModelLocal, model.id);
-      } else {
-        localStorage.setItem(storageKeys.selectedModelOpenRouter, model.id);
-      }
     }
     let creator = modelId.split('/')[0];
     // Show/hide reasoning toggle based on model support
@@ -2109,10 +1626,6 @@ Instructions: ${systemPrompt}`;
       ui.sortOrder.addEventListener('change', renderModelOptions);
     }
     
-    // Mode toggle event
-    if (ui.modeToggle) {
-      ui.modeToggle.addEventListener('change', handleModeToggle);
-    }
   }
 
   // Initialize persistence (API key, presets) once DOM elements are ready
@@ -2120,7 +1633,5 @@ Instructions: ${systemPrompt}`;
   initCustomDropdown();
   fetchModels();
   
-  // Initialize mode UI
-  updateModeUI();
 })();
 

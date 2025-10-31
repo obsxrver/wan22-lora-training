@@ -139,19 +139,6 @@
                 <label>🧠 (Reasoning)</label>
             </div>
             <div class="field">
-                <label>Training Mode</label>
-                <div class="mode-switch">
-                    <label class="switch">
-                        <input type="checkbox" id="modeToggle">
-                        <span class="slider"></span>
-                    </label>
-                    <label for="modeToggle">
-                        <span id="modeLabel">Text-to-Image</span>
-                        <span class="mode-description" id="modeDescription">Generate captions describing images</span>
-                    </label>
-                </div>
-            </div>
-            <div class="field">
                 <label for="systemPrompt">System Prompt</label>
                 <textarea id="systemPrompt" rows="5" placeholder="Describe exactly how captions should be produced."></textarea>
             </div>
@@ -169,13 +156,6 @@
                 <label for="files">Upload Images/Videos</label>
                 <input type="file" id="files" accept="image/*,video/*,.txt,text/plain" multiple>
             </div>
-
-            <div class="field" id="outputFilesField" style="display: none;">
-                <label for="outputFiles">Upload Output Images (Image-to-Image Mode)</label>
-                <input type="file" id="outputFiles" accept="image/*" multiple>
-                <div class="hint">For image-to-image mode, upload output images that correspond to your input images. Files should have matching names.</div>
-            </div>
-
             <details class="advanced-section">
                 <summary>Advanced Options</summary>
                 <div class="advanced-content">
@@ -202,33 +182,6 @@
                             <label for="framesPerVideo">Frames per Video</label>
                             <input type="number" id="framesPerVideo" min="1" max="15" value="8">
                         </div>
-                    </div>
-                    <div class="field">
-                        <label class="switch">
-                            <input type="checkbox" id="useCustomVllm">
-                            <span class="slider"></span>
-                        </label>
-                        <label>Use Custom VLLM Server <span class="vllm-tooltip"><span id="vllmStatusIndicator" class="vllm-status-indicator hidden"></span><span class="vllm-tooltip-text" id="vllmStatusTooltip">Connecting to VLLM server...</span></span></label>
-                    </div>
-                    <div class="field" id="customVllmField" style="display: none;">
-                        <label for="customVllmEndpoint">VLLM Server</label>
-                        <input type="text" id="customVllmEndpoint" placeholder="192.168.1.100:8000 or example.com" autocomplete="off">
-                        <div class="hint">Enter your VLLM server (IP:port, domain, or full URL, e.g., 192.168.1.100:8000, example.com, or https://example.com)</div>
-                    </div>
-                    <div class="field" id="customVllmBearerTokenField" style="display: none;">
-                        <label for="customVllmBearerToken">Bearer Token (Optional)</label>
-                        <input type="password" id="customVllmBearerToken" placeholder="Bearer token for server authentication" autocomplete="off">
-                        <div class="hint">Enter bearer token if your VLLM server requires authentication</div>
-                    </div>
-                    <div class="field" id="customVllmBasicAuthField" style="display: none;">
-                        <label for="customVllmUsername">Username (Optional)</label>
-                        <input type="text" id="customVllmUsername" placeholder="Username for Basic Auth" autocomplete="off">
-                        <div class="hint">Enter username for Basic Authentication if required</div>
-                    </div>
-                    <div class="field" id="customVllmPasswordField" style="display: none;">
-                        <label for="customVllmPassword">Password (Optional)</label>
-                        <input type="password" id="customVllmPassword" placeholder="Password for Basic Auth" autocomplete="off">
-                        <div class="hint">Enter password for Basic Authentication if required</div>
                     </div>
                 </div>
             </details>
