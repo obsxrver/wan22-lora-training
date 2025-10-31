@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import re
+import secrets
 import shutil
 import subprocess
 from collections import deque
@@ -9,8 +10,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel, Field
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RUN_SCRIPT = REPO_ROOT / "run_wan_training.sh"
@@ -23,6 +27,76 @@ API_KEY_CONFIG_PATH = Path.home() / ".config" / "vastai" / "vast_api_key"
 MANAGE_KEYS_URL = "https://cloud.vast.ai/manage-keys"
 CLOUD_SETTINGS_URL = "https://cloud.vast.ai/settings/"
 DATASET_ROOT.mkdir(parents=True, exist_ok=True)
+
+TOKEN_ENV_VAR = "JUPYTER_TOKEN"
+AUTH_COOKIE_NAME = "token"
+AUTH_QUERY_PARAM = "token"
+
+
+def _load_auth_token() -> str:
+    token = os.environ.get(TOKEN_ENV_VAR)
+    if token:
+        return token
+    generated = secrets.token_hex(32)
+    print(
+        "[webui] JUPYTER_TOKEN environment variable not set. "
+        "Generated temporary token for this process: %s" % generated
+    )
+    return generated
+
+
+AUTH_TOKEN = _load_auth_token()
+
+
+class TokenAuthMiddleware(BaseHTTPMiddleware):
+    def __init__(self, app: FastAPI, token: str) -> None:
+        super().__init__(app)
+        self._token = token
+
+    async def dispatch(self, request: Request, call_next):
+        if not self._token:
+            return await call_next(request)
+
+        cookie_token = request.cookies.get(AUTH_COOKIE_NAME)
+        query_token = request.query_params.get(AUTH_QUERY_PARAM)
+        token_source = None
+
+        if cookie_token == self._token:
+            token_source = "cookie"
+        elif query_token == self._token:
+            token_source = "query"
+
+        if token_source is None:
+            if request.method == "OPTIONS":
+                return await call_next(request)
+            return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+
+        if token_source == "query" and request.method in {"GET", "HEAD"}:
+            redirect_url = request.url.remove_query_params(AUTH_QUERY_PARAM)
+            response = RedirectResponse(url=str(redirect_url), status_code=303)
+            response.set_cookie(
+                AUTH_COOKIE_NAME,
+                self._token,
+                httponly=True,
+                secure=redirect_url.scheme == "https",
+                samesite="lax",
+                path="/",
+            )
+            return response
+
+        response = await call_next(request)
+
+        if token_source == "query" and cookie_token != self._token:
+            response.set_cookie(
+                AUTH_COOKIE_NAME,
+                self._token,
+                httponly=True,
+                secure=request.url.scheme == "https",
+                samesite="lax",
+                path="/",
+            )
+
+        return response
 
 STEP_PATTERNS = [
     re.compile(r"global_step(?:=|:)\s*(\d+)"),
@@ -366,6 +440,8 @@ class TrainingState:
 event_manager = EventManager()
 training_state = TrainingState()
 app = FastAPI(title="WAN 2.2 Training UI")
+
+app.add_middleware(TokenAuthMiddleware, token=AUTH_TOKEN)
 
 
 @app.get("/", response_class=HTMLResponse)
