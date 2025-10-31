@@ -621,6 +621,11 @@
             responsive: true,
             animation: false,
             maintainAspectRatio: false,
+            interaction: {
+              mode: 'index',
+              intersect: false,
+              axis: 'x',
+            },
             scales: {
               x: {
                 type: 'linear',
@@ -638,6 +643,26 @@
               legend: {
                 labels: {
                   color: '#e8eaed',
+                },
+              },
+              tooltip: {
+                intersect: false,
+                callbacks: {
+                  title: (context) => {
+                    if (!context?.length) {
+                      return '';
+                    }
+                    const step = context[0].parsed?.x;
+                    return Number.isFinite(step) ? `Step ${step}` : '';
+                  },
+                  label: (context) => {
+                    const label = context.dataset?.label || '';
+                    const loss = context.parsed?.y;
+                    if (!Number.isFinite(loss)) {
+                      return label;
+                    }
+                    return `${label}: ${loss.toFixed(6)}`;
+                  },
                 },
               },
             },
