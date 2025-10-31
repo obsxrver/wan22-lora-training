@@ -203,7 +203,7 @@ check_low_vram() {
 # block swap on anything 32GB or less VRAM
 determine_attention_flags() {
   if check_low_vram; then
-    echo "--sdpa --blocks_to_swap 10"
+    echo "--sdpa --blocks_to_swap 1"
   else
     echo "--sdpa"
   fi
