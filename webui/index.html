@@ -103,6 +103,78 @@
         color: var(--muted);
       }
 
+      #dataset-preview-section {
+        margin-top: 1.5rem;
+      }
+
+      #dataset-preview-section h3 {
+        margin: 0;
+        font-size: 1.1rem;
+      }
+
+      #dataset-preview-message {
+        margin-top: 0.75rem;
+        font-size: 0.9rem;
+        color: var(--muted);
+      }
+
+      .dataset-grid {
+        margin-top: 1rem;
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 1rem;
+      }
+
+      .dataset-card {
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        overflow: hidden;
+        background: rgba(255, 255, 255, 0.04);
+        display: flex;
+        flex-direction: column;
+        min-height: 100%;
+      }
+
+      .dataset-card img {
+        width: 100%;
+        height: 180px;
+        object-fit: cover;
+        background: rgba(0, 0, 0, 0.35);
+      }
+
+      .dataset-card-body {
+        padding: 0.9rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.45rem;
+      }
+
+      .dataset-card-title {
+        margin: 0;
+        font-weight: 600;
+        font-size: 0.95rem;
+        color: var(--text);
+        word-break: break-word;
+      }
+
+      .dataset-card-meta {
+        margin: 0;
+        font-size: 0.75rem;
+        color: var(--muted);
+        word-break: break-word;
+      }
+
+      .dataset-card-caption {
+        margin: 0;
+        font-size: 0.85rem;
+        color: var(--muted);
+        white-space: pre-wrap;
+      }
+
+      .dataset-card-caption--empty {
+        font-style: italic;
+      }
+
       form {
         display: grid;
         gap: 1rem;
@@ -276,6 +348,12 @@
         main {
           padding: 1rem;
         }
+        .dataset-grid {
+          grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+        }
+        .dataset-card img {
+          height: 150px;
+        }
       }
     </style>
   </head>
@@ -293,6 +371,11 @@
         </div>
         <input id="fileInput" type="file" multiple />
         <div id="upload-summary">Files will be saved to /workspace/musubi-tuner/dataset/.</div>
+        <div id="dataset-preview-section">
+          <h3>Current dataset</h3>
+          <div id="dataset-preview-message" aria-live="polite">No dataset files uploaded yet.</div>
+          <div id="dataset-grid" class="dataset-grid" role="list"></div>
+        </div>
       </section>
 
       <section>
@@ -401,6 +484,8 @@
       const dropzone = document.getElementById('dropzone');
       const fileInput = document.getElementById('fileInput');
       const uploadSummary = document.getElementById('upload-summary');
+      const datasetGrid = document.getElementById('dataset-grid');
+      const datasetMessage = document.getElementById('dataset-preview-message');
       const form = document.getElementById('trainingForm');
       const statusEl = document.getElementById('status');
       const messageEl = document.getElementById('message');
@@ -429,6 +514,104 @@
 
       const MAX_LOG_LINES = 400;
       const logLines = [];
+
+      function setDatasetMessage(text = '', isError = false) {
+        if (!datasetMessage) {
+          return;
+        }
+        datasetMessage.textContent = text;
+        datasetMessage.style.display = text ? 'block' : 'none';
+        datasetMessage.style.color = isError ? '#ff8a80' : 'var(--muted)';
+      }
+
+      function createDatasetCard(item) {
+        const card = document.createElement('article');
+        card.className = 'dataset-card';
+        card.setAttribute('role', 'listitem');
+
+        const image = document.createElement('img');
+        image.loading = 'lazy';
+        image.decoding = 'async';
+        image.draggable = false;
+        if (item?.image_url) {
+          const cacheBuster = encodeURIComponent(item.image_path || item.image_url);
+          image.src = `${item.image_url}?v=${cacheBuster}`;
+        }
+        image.alt = item?.image_path ? `Dataset image ${item.image_path}` : 'Dataset image preview';
+        card.appendChild(image);
+
+        const body = document.createElement('div');
+        body.className = 'dataset-card-body';
+
+        const title = document.createElement('p');
+        title.className = 'dataset-card-title';
+        title.textContent = item?.image_path || 'Unknown image';
+        body.appendChild(title);
+
+        if (item?.caption_path) {
+          const captionMeta = document.createElement('p');
+          captionMeta.className = 'dataset-card-meta';
+          captionMeta.textContent = `Caption: ${item.caption_path}`;
+          body.appendChild(captionMeta);
+        }
+
+        const caption = document.createElement('p');
+        caption.className = 'dataset-card-caption';
+        if (item?.caption_text) {
+          caption.textContent = item.caption_text;
+        } else {
+          caption.textContent = 'No caption file found for this image.';
+          caption.classList.add('dataset-card-caption--empty');
+        }
+        body.appendChild(caption);
+
+        card.appendChild(body);
+        return card;
+      }
+
+      function renderDatasetPreview(items) {
+        if (!datasetGrid) {
+          return;
+        }
+        datasetGrid.innerHTML = '';
+        if (!items?.length) {
+          return;
+        }
+        const fragment = document.createDocumentFragment();
+        items.forEach((item) => {
+          fragment.appendChild(createDatasetCard(item));
+        });
+        datasetGrid.appendChild(fragment);
+      }
+
+      async function refreshDatasetPreview() {
+        if (!datasetGrid || !datasetMessage) {
+          return;
+        }
+        setDatasetMessage('Loading dataset preview…');
+        datasetGrid.setAttribute('aria-busy', 'true');
+        datasetGrid.innerHTML = '';
+        try {
+          const response = await fetch('/dataset/files');
+          if (!response.ok) {
+            throw new Error('Failed to fetch dataset preview');
+          }
+          const data = await response.json();
+          const items = Array.isArray(data?.items) ? data.items : [];
+          if (!items.length) {
+            setDatasetMessage('No dataset files uploaded yet.');
+            return;
+          }
+          renderDatasetPreview(items);
+          const totalValue = Number(data?.total);
+          const total = Number.isFinite(totalValue) && totalValue >= 0 ? totalValue : items.length;
+          setDatasetMessage(`Showing ${total} image${total === 1 ? '' : 's'} from the current dataset.`);
+        } catch (error) {
+          setDatasetMessage(error?.message || 'Failed to load dataset preview.', true);
+        } finally {
+          datasetGrid.removeAttribute('aria-busy');
+        }
+      }
 
       function setApiKeyMessage(text = '', isError = false) {
         if (!apiKeyMessageEl) {
@@ -672,6 +855,8 @@
 
       initChart();
 
+      refreshDatasetPreview();
+
       function resetChart() {
         chart.data.datasets.forEach((dataset) => {
           dataset.data = [];
@@ -704,6 +889,8 @@
           uploadSummary.textContent = `Uploaded ${result.count} file(s).`;
         } catch (error) {
           uploadSummary.textContent = error.message || 'Upload failed';
+        } finally {
+          await refreshDatasetPreview();
         }
       }
 

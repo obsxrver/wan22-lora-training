@@ -1,5 +1,6 @@
 import asyncio
 import json
+import mimetypes
 import os
 import re
 import secrets
@@ -27,6 +28,18 @@ API_KEY_CONFIG_PATH = Path.home() / ".config" / "vastai" / "vast_api_key"
 MANAGE_KEYS_URL = "https://cloud.vast.ai/manage-keys"
 CLOUD_SETTINGS_URL = "https://cloud.vast.ai/settings/"
 DATASET_ROOT.mkdir(parents=True, exist_ok=True)
+
+IMAGE_EXTENSIONS = {
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".webp",
+    ".bmp",
+    ".gif",
+}
+CAPTION_PRIORITY = {".txt": 0, ".caption": 1, ".json": 2}
+CAPTION_EXTENSIONS = set(CAPTION_PRIORITY)
+CAPTION_PREVIEW_LIMIT = 500
 
 TOKEN_ENV_VAR = "JUPYTER_TOKEN"
 AUTH_COOKIE_NAME = "token"
@@ -471,6 +484,78 @@ def _clear_dataset_directory() -> None:
     DATASET_ROOT.mkdir(parents=True, exist_ok=True)
 
 
+def _resolve_dataset_file(path: str) -> Path:
+    dataset_root = DATASET_ROOT.resolve()
+    target_path = (dataset_root / path).resolve()
+    if not target_path.exists() or not target_path.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    if dataset_root not in target_path.parents:
+        raise HTTPException(status_code=400, detail="Invalid dataset path")
+    return target_path
+
+
+def _collect_dataset_items() -> List[Dict[str, Any]]:
+    if not DATASET_ROOT.exists() or not DATASET_ROOT.is_dir():
+        return []
+
+    dataset_root = DATASET_ROOT.resolve()
+    captions: Dict[tuple[str, str], Dict[str, Any]] = {}
+
+    for file_path in dataset_root.rglob("*"):
+        if not file_path.is_file():
+            continue
+        suffix = file_path.suffix.lower()
+        if suffix not in CAPTION_EXTENSIONS:
+            continue
+
+        relative = file_path.relative_to(dataset_root)
+        parent_key = relative.parent.as_posix()
+        stem_key = file_path.stem.lower()
+        priority = CAPTION_PRIORITY.get(suffix, 999)
+        existing = captions.get((parent_key, stem_key))
+        if existing and existing["priority"] <= priority:
+            continue
+
+        try:
+            text = file_path.read_text(encoding="utf-8", errors="replace").strip()
+        except OSError:
+            text = ""
+        if len(text) > CAPTION_PREVIEW_LIMIT:
+            text = text[:CAPTION_PREVIEW_LIMIT].rstrip() + "…"
+
+        captions[(parent_key, stem_key)] = {
+            "caption_path": relative.as_posix(),
+            "caption_text": text,
+            "priority": priority,
+        }
+
+    items: List[Dict[str, Any]] = []
+
+    for file_path in dataset_root.rglob("*"):
+        if not file_path.is_file():
+            continue
+        suffix = file_path.suffix.lower()
+        if suffix not in IMAGE_EXTENSIONS:
+            continue
+
+        relative = file_path.relative_to(dataset_root)
+        parent_key = relative.parent.as_posix()
+        stem_key = file_path.stem.lower()
+        caption_info = captions.get((parent_key, stem_key), {})
+
+        items.append(
+            {
+                "image_path": relative.as_posix(),
+                "image_url": f"/dataset/image/{relative.as_posix()}",
+                "caption_path": caption_info.get("caption_path"),
+                "caption_text": caption_info.get("caption_text"),
+            }
+        )
+
+    items.sort(key=lambda item: item["image_path"].lower())
+    return items
+
+
 @app.post("/upload")
 async def upload(files: List[UploadFile] = File(...)) -> Dict:
     if not files:
@@ -492,6 +577,23 @@ async def upload(files: List[UploadFile] = File(...)) -> Dict:
         await file.close()
         saved.append(str(destination))
     return {"saved": saved, "count": len(saved)}
+
+
+@app.get("/dataset/files")
+async def dataset_files() -> Dict[str, Any]:
+    items = _collect_dataset_items()
+    return {"items": items, "total": len(items)}
+
+
+@app.get("/dataset/image/{path:path}")
+async def dataset_image(path: str) -> StreamingResponse:
+    try:
+        file_path = _resolve_dataset_file(path)
+    except HTTPException:
+        raise
+    media_type, _ = mimetypes.guess_type(str(file_path))
+    media_type = media_type or "application/octet-stream"
+    return StreamingResponse(file_path.open("rb"), media_type=media_type)
 
 
 @app.get("/cloud-status")
