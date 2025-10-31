@@ -588,24 +588,35 @@ def _collect_dataset_items() -> List[Dict[str, Any]]:
         if not file_path.is_file():
             continue
         suffix = file_path.suffix.lower()
-        if suffix not in IMAGE_EXTENSIONS:
+        if suffix not in MEDIA_EXTENSIONS:
             continue
 
         relative = file_path.relative_to(dataset_root)
         parent_key = relative.parent.as_posix()
         stem_key = file_path.stem.lower()
         caption_info = captions.get((parent_key, stem_key), {})
+        media_path = relative.as_posix()
+        media_url = f"/dataset/image/{media_path}"
+        media_kind = "video" if suffix in VIDEO_EXTENSIONS else "image"
 
-        items.append(
-            {
-                "image_path": relative.as_posix(),
-                "image_url": f"/dataset/image/{relative.as_posix()}",
-                "caption_path": caption_info.get("caption_path"),
-                "caption_text": caption_info.get("caption_text"),
-            }
-        )
+        item: Dict[str, Any] = {
+            "media_path": media_path,
+            "media_url": media_url,
+            "media_kind": media_kind,
+            "caption_path": caption_info.get("caption_path"),
+            "caption_text": caption_info.get("caption_text"),
+        }
 
-    items.sort(key=lambda item: item["image_path"].lower())
+        if media_kind == "image":
+            item["image_path"] = media_path
+            item["image_url"] = media_url
+        else:
+            item["video_path"] = media_path
+            item["video_url"] = media_url
+
+        items.append(item)
+
+    items.sort(key=lambda item: item["media_path"].lower())
     return items
 
 

@@ -143,9 +143,52 @@
         margin-top: 1.5rem;
       }
 
-      #dataset-preview-section h3 {
+      .dataset-preview-collapsible {
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 0.75rem 1rem 1rem;
+        background: rgba(255, 255, 255, 0.04);
+      }
+
+      .dataset-preview-collapsible summary {
+        list-style: none;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.25rem 0;
+      }
+
+      .dataset-preview-collapsible summary::-webkit-details-marker {
+        display: none;
+      }
+
+      .dataset-preview-collapsible summary:focus-visible {
+        outline: 2px solid rgba(138, 180, 248, 0.6);
+        border-radius: 8px;
+      }
+
+      .dataset-preview-collapsible summary::after {
+        content: '▾';
+        font-size: 0.9rem;
+        margin-left: auto;
+        color: var(--muted);
+        transition: transform 0.2s ease;
+      }
+
+      .dataset-preview-collapsible[open] summary::after {
+        transform: rotate(180deg);
+      }
+
+      .dataset-preview-collapsible h3 {
         margin: 0;
         font-size: 1.1rem;
+      }
+
+      .dataset-preview-hint {
+        margin: 0.5rem 0 1rem;
+        font-size: 0.85rem;
+        color: var(--muted);
       }
 
       #dataset-preview-message {
@@ -171,11 +214,16 @@
         min-height: 100%;
       }
 
-      .dataset-card img {
+      .dataset-card-media {
         width: 100%;
         height: 180px;
         object-fit: cover;
         background: rgba(0, 0, 0, 0.35);
+        display: block;
+      }
+
+      .dataset-card video.dataset-card-media {
+        object-fit: cover;
       }
 
       .dataset-card-body {
@@ -387,7 +435,7 @@
         .dataset-grid {
           grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
         }
-        .dataset-card img {
+        .dataset-card-media {
           height: 150px;
         }
       }
@@ -414,9 +462,17 @@
         <input id="fileInput" type="file" multiple />
         <div id="upload-summary">Files will be saved to /workspace/musubi-tuner/dataset/.</div>
         <div id="dataset-preview-section">
-          <h3>Current dataset</h3>
-          <div id="dataset-preview-message" aria-live="polite">No dataset files uploaded yet.</div>
-          <div id="dataset-grid" class="dataset-grid" role="list"></div>
+          <details class="dataset-preview-collapsible" open>
+            <summary>
+              <h3>Current dataset</h3>
+            </summary>
+            <p class="dataset-preview-hint">
+              Need captions? Try the SillyCaption tool from the navigation bar to auto-generate prompts for images or videos that
+              are still missing descriptions before you start training.
+            </p>
+            <div id="dataset-preview-message" aria-live="polite">No dataset files uploaded yet.</div>
+            <div id="dataset-grid" class="dataset-grid" role="list"></div>
+          </details>
         </div>
       </section>
 
@@ -556,6 +612,7 @@
 
       const MAX_LOG_LINES = 400;
       const logLines = [];
+      const VIDEO_EXTENSION_PATTERN = /\.(mp4|mov|avi|mkv|webm|mpg|mpeg)$/i;
 
       function setDatasetMessage(text = '', isError = false) {
         if (!datasetMessage) {
@@ -571,23 +628,59 @@
         card.className = 'dataset-card';
         card.setAttribute('role', 'listitem');
 
-        const image = document.createElement('img');
-        image.loading = 'lazy';
-        image.decoding = 'async';
-        image.draggable = false;
-        if (item?.image_url) {
-          const cacheBuster = encodeURIComponent(item.image_path || item.image_url);
-          image.src = `${item.image_url}?v=${cacheBuster}`;
+        const mediaPath = item?.media_path || item?.image_path || item?.video_path || '';
+        const mediaUrl = item?.media_url || item?.image_url || item?.video_url || '';
+        const isVideo =
+          item?.media_kind === 'video' ||
+          (typeof mediaPath === 'string' && VIDEO_EXTENSION_PATTERN.test(mediaPath));
+
+        const cacheKey = mediaPath || mediaUrl;
+
+        let mediaElement;
+        if (isVideo) {
+          mediaElement = document.createElement('video');
+          mediaElement.preload = 'metadata';
+          mediaElement.muted = true;
+          mediaElement.defaultMuted = true;
+          mediaElement.loop = true;
+          mediaElement.playsInline = true;
+          mediaElement.setAttribute('playsinline', '');
+          mediaElement.controls = true;
+          mediaElement.setAttribute('controlslist', 'nodownload noremoteplayback');
+          mediaElement.draggable = false;
+          if (mediaUrl) {
+            const cacheBuster = encodeURIComponent(cacheKey);
+            mediaElement.src = `${mediaUrl}?v=${cacheBuster}`;
+          }
+          mediaElement.setAttribute(
+            'aria-label',
+            mediaPath ? `Dataset video ${mediaPath}` : 'Dataset video preview'
+          );
+        } else {
+          mediaElement = document.createElement('img');
+          mediaElement.loading = 'lazy';
+          mediaElement.decoding = 'async';
+          mediaElement.draggable = false;
+          if (mediaUrl) {
+            const cacheBuster = encodeURIComponent(cacheKey);
+            mediaElement.src = `${mediaUrl}?v=${cacheBuster}`;
+          }
+          mediaElement.alt = mediaPath
+            ? `Dataset image ${mediaPath}`
+            : 'Dataset image preview';
         }
-        image.alt = item?.image_path ? `Dataset image ${item.image_path}` : 'Dataset image preview';
-        card.appendChild(image);
+        mediaElement.className = 'dataset-card-media';
+        if (mediaPath) {
+          mediaElement.title = mediaPath;
+        }
+        card.appendChild(mediaElement);
 
         const body = document.createElement('div');
         body.className = 'dataset-card-body';
 
         const title = document.createElement('p');
         title.className = 'dataset-card-title';
-        title.textContent = item?.image_path || 'Unknown image';
+        title.textContent = mediaPath || 'Unknown file';
         body.appendChild(title);
 
         if (item?.caption_path) {
@@ -602,7 +695,7 @@
         if (item?.caption_text) {
           caption.textContent = item.caption_text;
         } else {
-          caption.textContent = 'No caption file found for this image.';
+          caption.textContent = 'No caption file found for this media.';
           caption.classList.add('dataset-card-caption--empty');
         }
         body.appendChild(caption);
@@ -647,7 +740,7 @@
           renderDatasetPreview(items);
           const totalValue = Number(data?.total);
           const total = Number.isFinite(totalValue) && totalValue >= 0 ? totalValue : items.length;
-          setDatasetMessage(`Showing ${total} image${total === 1 ? '' : 's'} from the current dataset.`);
+          setDatasetMessage(`Showing ${total} media file${total === 1 ? '' : 's'} from the current dataset.`);
         } catch (error) {
           setDatasetMessage(error?.message || 'Failed to load dataset preview.', true);
         } finally {
