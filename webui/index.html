@@ -41,6 +41,28 @@
         color: var(--muted);
       }
 
+      .nav-links {
+        margin-top: 1rem;
+        display: flex;
+        justify-content: center;
+      }
+
+      .nav-button {
+        display: inline-block;
+        padding: 0.6rem 1.4rem;
+        border-radius: 999px;
+        background: var(--accent);
+        color: var(--bg);
+        font-weight: 600;
+        text-decoration: none;
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+      }
+
+      .nav-button:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 12px 24px rgba(138, 180, 248, 0.35);
+      }
+
       main {
         max-width: 1100px;
         margin: 0 auto;
@@ -361,6 +383,9 @@
     <header>
       <h1>WAN 2.2 LoRA Training</h1>
       <p>Upload your dataset, configure prompts, and launch training with live feedback.</p>
+      <div class="nav-links">
+        <a class="nav-button" href="/SillyCaption">Open SillyCaption Dataset Manager</a>
+      </div>
     </header>
     <main>
       <section>

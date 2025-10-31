@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SillyCaption Dataset Manager</title>
+    <link rel="icon" href="{{ url_for('sillycaption.static', filename='favicon2.ico') }}" />
+    <link rel="apple-touch-icon" href="{{ url_for('sillycaption.static', filename='pfp.png') }}" />
+    <link rel="stylesheet" href="{{ url_for('sillycaption.static', filename='styles.css') }}" />
+  </head>
+  <body>
+    <header>
+      <div class="header-left">
+        <h1>SillyCaption</h1>
+        <div class="subtitle">Serious Edition</div>
+      </div>
+      <nav class="header-nav">
+        <a class="nav-link" href="/">WAN Training</a>
+      </nav>
+    </header>
+    <main>
+      <section class="controls">
+        <div class="field">
+          <label>OpenRouter Account</label>
+          <div class="oauth-row">
+            <button id="btnSignIn">Sign in with OpenRouter</button>
+            <div class="oauth-status">
+              <span id="authStatus" class="badge">Signed out</span>
+              <button id="btnSignOut" disabled>Sign out</button>
+            </div>
+          </div>
+          <div class="hint">Sign in is recommended. Manual API key entry is still available below.</div>
+        </div>
+        <div class="field">
+          <label for="apiKey">OpenRouter API Key</label>
+          <input type="password" id="apiKey" placeholder="sk-or-v1-..." autocomplete="off" />
+        </div>
+        <div class="field">
+          <label for="modelId">Model</label>
+          <div class="custom-select-wrapper">
+            <div class="custom-select">
+              <div class="custom-select-trigger">
+                <span id="selectedModelName">Select a model...</span>
+                <div class="arrow"></div>
+              </div>
+              <div class="custom-options">
+                <div class="custom-options-header">
+                  <select id="providerFilter">
+                    <option value="all" selected>All</option>
+                    <option value="google">Google</option>
+                    <option value="openai">OpenAI</option>
+                    <option value="anthropic">Anthropic</option>
+                    <option value="mistralai">Mistral</option>
+                    <option value="meta-llama">Meta</option>
+                    <option value="qwen">Qwen</option>
+                  </select>
+                  <select id="sortOrder">
+                    <option value="alphabetical">A-Z</option>
+                    <option value="chronological" selected>By Release</option>
+                  </select>
+                  <input type="text" id="modelSearch" placeholder="Search models..." />
+                </div>
+                <div id="modelOptions" class="model-options-list"></div>
+              </div>
+            </div>
+          </div>
+          <input type="hidden" id="modelId" />
+        </div>
+        <div class="field reasoning-field" id="reasoningToggleField" style="display: none;">
+          <label class="switch">
+            <input type="checkbox" id="reasoningToggle" checked />
+            <span class="slider"></span>
+          </label>
+          <label>🧠 (Reasoning)</label>
+        </div>
+        <div class="field">
+          <label for="systemPrompt">System Prompt</label>
+          <textarea id="systemPrompt" rows="5" placeholder="Describe exactly how captions should be produced."></textarea>
+        </div>
+        <div class="field">
+          <label for="presetSelect">Prompt Presets</label>
+          <div class="preset-row">
+            <select id="presetSelect"></select>
+            <input type="text" id="presetName" placeholder="Preset name" autocomplete="off" />
+            <button id="btnSavePreset">Save Preset</button>
+            <button id="btnDeletePreset">Delete</button>
+          </div>
+          <div class="hint">Selecting a preset fills the System Prompt. Saving stores it in your browser.</div>
+        </div>
+        <div class="field">
+          <label for="files">Upload Images/Videos</label>
+          <input type="file" id="files" accept="image/*,video/*,.txt,text/plain" multiple />
+        </div>
+        <div class="field" id="outputFilesField" style="display: none;">
+          <label for="outputFiles">Upload Output Images</label>
+          <input type="file" id="outputFiles" accept="image/*" multiple />
+        </div>
+        <div class="field" style="display: none;">
+          <label>Training Mode</label>
+          <div class="mode-switch">
+            <label class="switch">
+              <input type="checkbox" id="modeToggle" />
+              <span class="slider"></span>
+            </label>
+            <label for="modeToggle">
+              <span id="modeLabel">Text-to-Image</span>
+              <span class="mode-description" id="modeDescription">Generate captions describing images</span>
+            </label>
+          </div>
+        </div>
+        <details class="advanced-section">
+          <summary>Advanced Options</summary>
+          <div class="advanced-content">
+            <div class="field grid-3">
+              <div>
+                <label for="rps">Max RPS</label>
+                <input type="number" id="rps" min="1" max="100" value="20" />
+              </div>
+              <div>
+                <label for="concurrency">Max Concurrency</label>
+                <input type="number" id="concurrency" min="1" max="60" value="20" />
+              </div>
+              <div>
+                <label for="downscaleMp">Downscale Target MP</label>
+                <input type="number" id="downscaleMp" min="0.2" max="2" step="0.1" value="1" />
+              </div>
+            </div>
+            <div class="field grid-3">
+              <div>
+                <label for="retryLimit">Retry Limit</label>
+                <input type="number" id="retryLimit" min="0" max="10" value="4" />
+              </div>
+              <div>
+                <label for="framesPerVideo">Frames per Video</label>
+                <input type="number" id="framesPerVideo" min="1" max="16" value="6" />
+              </div>
+              <div>
+                <label for="presetSelect">Status</label>
+                <div id="progressText">Idle</div>
+              </div>
+            </div>
+            <progress id="progressBar" max="100" value="0"></progress>
+          </div>
+        </details>
+        <div class="actions">
+          <button id="btnCaption">Caption All</button>
+          <button id="btnCaptionUncaptioned">Caption Uncaptioned</button>
+          <button id="btnCancel">Cancel</button>
+          <button id="btnClear">Clear</button>
+          <button id="btnClearAllCaptions">Clear Captions</button>
+          <button id="btnSaveZip" disabled>Download Captions</button>
+        </div>
+        <div id="customVllmField" style="display: none;">
+          <label>
+            <input type="checkbox" id="useCustomVllm" />
+            Use Custom VLLM Server
+          </label>
+          <div class="field" id="customVllmEndpointField">
+            <label for="customVllmEndpoint">Endpoint</label>
+            <input type="text" id="customVllmEndpoint" />
+          </div>
+          <div class="field" id="customVllmBearerTokenField">
+            <label for="customVllmBearerToken">Bearer Token</label>
+            <input type="password" id="customVllmBearerToken" />
+          </div>
+          <div class="field" id="customVllmBasicAuthField">
+            <label for="customVllmUsername">Username</label>
+            <input type="text" id="customVllmUsername" />
+          </div>
+          <div class="field" id="customVllmPasswordField">
+            <label for="customVllmPassword">Password</label>
+            <input type="password" id="customVllmPassword" />
+          </div>
+          <div id="vllmStatusIndicator" class="status-indicator hidden"></div>
+          <div id="vllmStatusTooltip" class="status-tooltip"></div>
+        </div>
+      </section>
+
+      <section class="dataset-management">
+        <h2>Dataset Management</h2>
+        <div class="dataset-actions">
+          <button id="btnImportActive">Import from Training Dataset</button>
+          <button id="btnExportActive">Export to Training Dataset</button>
+        </div>
+        <div class="dataset-library">
+          <div class="library-controls">
+            <select id="librarySelect"></select>
+            <button id="btnLoadLibrary">Load Selected Dataset</button>
+          </div>
+          <div class="library-save">
+            <input type="text" id="libraryName" placeholder="Dataset name" />
+            <button id="btnSaveLibrary">Save to Library</button>
+          </div>
+        </div>
+        <div class="hint">Library datasets are stored on disk at SillyCaption/Datasets/&lt;name&gt;.</div>
+      </section>
+
+      <section class="results">
+        <h2>Results</h2>
+        <div id="results" class="results-grid"></div>
+      </section>
+    </main>
+
+    <script src="{{ url_for('sillycaption.static', filename='jszip.min.js') }}"></script>
+    <script>
+      window.SILLYCAPTION_CONFIG = {
+        apiBase: '{{ url_for('sillycaption.index') }}'.replace(/\/$/, ''),
+      };
+    </script>
+    <script src="{{ url_for('sillycaption.static', filename='script.js') }}"></script>
+  </body>
+</html>

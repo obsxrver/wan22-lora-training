@@ -122,6 +122,28 @@ header {
   align-items: center;
 }
 
+header .header-nav {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+header .nav-link {
+  color: var(--text);
+  text-decoration: none;
+  font-weight: 600;
+  padding: 0.6rem 1.2rem;
+  border-radius: 999px;
+  background: rgba(249, 115, 22, 0.12);
+  border: 1px solid rgba(249, 115, 22, 0.4);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+header .nav-link:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 24px rgba(249, 115, 22, 0.35);
+}
+
 header .header-left {
   display: flex;
   flex-direction: column;
@@ -1313,3 +1335,33 @@ textarea:focus-visible {
   opacity: 1;
 }
 
+
+.dataset-management {
+  display: grid;
+  gap: 16px;
+}
+
+.dataset-management .dataset-actions,
+.dataset-management .dataset-library {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.dataset-management .library-controls,
+.dataset-management .library-save {
+  display: flex;
+  gap: 12px;
+  flex: 1;
+  min-width: 220px;
+}
+
+.dataset-management select,
+.dataset-management input[type="text"] {
+  flex: 1;
+  padding: 0.6rem 0.9rem;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(32, 32, 32, 0.9);
+  color: var(--text);
+}

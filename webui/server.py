@@ -11,11 +11,14 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.middleware.wsgi import WSGIMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
+
+from SillyCaption.flask_app import create_app as create_sillycaption_app
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RUN_SCRIPT = REPO_ROOT / "run_wan_training.sh"
@@ -455,6 +458,9 @@ training_state = TrainingState()
 app = FastAPI(title="WAN 2.2 Training UI")
 
 app.add_middleware(TokenAuthMiddleware, token=AUTH_TOKEN)
+
+sillycaption_app = create_sillycaption_app()
+app.mount("/SillyCaption", WSGIMiddleware(sillycaption_app))
 
 
 @app.get("/", response_class=HTMLResponse)
