@@ -13,10 +13,9 @@ NEXT STEPS:
 We are going to integrate a dataset captioning interface, called sillycaption. 
 The SillyCaption/ dirrectory currently contains the original source code for a standalone HTML app that captions image and video datasets using OpenRouter. It is not integrated into the rest of the app in any way in its current form. 
 Your task will be to
-1. port SillyCaption to flask and integrate it as a page /SillyCaption inside our existing app
-2. Remove/Do Not Implement the VLLM functionality, we will be using openrouter API only for simplicity. Also remove/do not implement the hybrid TextToImage / ImageToImage functionality.  
+1. Integrate sillycaption as a page /SillyCaption inside our existing wan-training-webui app
 3. Add a feature to import the active training dataset from /workspace/musubi-tuner/dataset/
 4. Add a feature to export whatever dataset is loaded in SillyCaption to /workspace/musubi-tuner/dataset/
 5. Add a feature to import/export the datasets in SillyCaption to/from a database library stored on the instance inside SillyCaption/Datasets/'Dataset Name'/[images and captions]
 6. Add intuitive navigation between the wan-training-webui/ and the wan-training-webui/SillyCaption page
-When finished, there should be a new page, wan-training-webui/SillyCaption, with all of the existing frontend and capability of the original except for the features I explicitally requested you leave out, and the added functionality I listed.
+When finished, there should be a new page, wan-training-webui/SillyCaption, with all of the existing frontend and capability of the original and the new features
