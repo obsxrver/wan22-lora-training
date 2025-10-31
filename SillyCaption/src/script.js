@@ -14,6 +14,9 @@
     openRouterFetchSeq: 0,
     currentItems: [],
     refreshSeq: 0,
+    datasetOrigin: null,
+    integrationBusy: false,
+    libraryDatasets: [],
   };
 
   const ui = {
@@ -54,6 +57,15 @@
     reasoningToggleField: el('reasoningToggleField'),
     modeLabel: el('modeLabel'),
     modeDescription: el('modeDescription'),
+    datasetSourceLabel: el('datasetSourceLabel'),
+    datasetStatusMessage: el('datasetStatusMessage'),
+    btnImportActive: el('btnImportActive'),
+    btnExportActive: el('btnExportActive'),
+    librarySelect: el('librarySelect'),
+    btnLoadLibrary: el('btnLoadLibrary'),
+    btnRefreshLibrary: el('btnRefreshLibrary'),
+    libraryNameInput: el('libraryNameInput'),
+    btnExportLibrary: el('btnExportLibrary'),
   };
 
   // Persistent storage keys
@@ -66,6 +78,131 @@
     selectedModel: 'sc_selected_model',
     selectedModelOpenRouter: 'sc_selected_model_openrouter',
   };
+
+  const SOURCE_TYPES = {
+    UPLOAD: 'upload',
+    ACTIVE: 'active',
+    LIBRARY: 'library',
+  };
+
+  let uploadCounter = 0;
+
+  function normalizeRelativePath(value) {
+    if (!value) return '';
+    return value.replace(/^[/\\]+/, '').replace(/\\/g, '/');
+  }
+
+  function makeItemName(prefix, relativePath, fallback = '') {
+    const normalized = normalizeRelativePath(relativePath);
+    if (normalized) {
+      return `${prefix}:${normalized}`;
+    }
+    uploadCounter += 1;
+    const safeFallback = (fallback || `item_${uploadCounter}`).replace(/\s+/g, '_');
+    return `${prefix}:${uploadCounter}:${safeFallback}`;
+  }
+
+  function hasCurrentItems() {
+    return Array.isArray(state.currentItems) && state.currentItems.length > 0;
+  }
+
+  function setDatasetStatus(message = '', isError = false) {
+    if (!ui.datasetStatusMessage) return;
+    ui.datasetStatusMessage.textContent = message;
+    ui.datasetStatusMessage.classList.toggle('error', !!isError);
+  }
+
+  function setDatasetOrigin(origin) {
+    state.datasetOrigin = origin || null;
+    updateDatasetOriginUI();
+    updateDatasetControlsDisabled();
+  }
+
+  function updateDatasetOriginUI() {
+    if (!ui.datasetSourceLabel) return;
+    const origin = state.datasetOrigin;
+    const badge = ui.datasetSourceLabel;
+    badge.classList.remove('active', 'library', 'upload');
+    if (!origin) {
+      badge.textContent = 'No dataset loaded';
+      return;
+    }
+    badge.textContent = origin.label || 'Dataset loaded';
+    if (origin.type === SOURCE_TYPES.ACTIVE) {
+      badge.classList.add('active');
+    } else if (origin.type === SOURCE_TYPES.LIBRARY) {
+      badge.classList.add('library');
+    } else if (origin.type === SOURCE_TYPES.UPLOAD) {
+      badge.classList.add('upload');
+    }
+  }
+
+  function setIntegrationBusy(busy) {
+    state.integrationBusy = !!busy;
+    updateDatasetControlsDisabled();
+  }
+
+  function updateDatasetControlsDisabled() {
+    const busy = state.running || state.integrationBusy;
+    const hasItems = hasCurrentItems();
+
+    if (ui.btnImportActive) {
+      ui.btnImportActive.disabled = state.integrationBusy || state.running;
+    }
+    if (ui.btnRefreshLibrary) {
+      ui.btnRefreshLibrary.disabled = state.integrationBusy;
+    }
+    if (ui.librarySelect) {
+      ui.librarySelect.disabled = state.integrationBusy;
+    }
+    if (ui.btnLoadLibrary) {
+      const hasSelection = !!(ui.librarySelect && ui.librarySelect.value);
+      ui.btnLoadLibrary.disabled = busy || !hasSelection;
+    }
+    if (ui.btnExportActive) {
+      ui.btnExportActive.disabled = busy || !hasItems;
+    }
+    if (ui.btnExportLibrary) {
+      const name = (ui.libraryNameInput && ui.libraryNameInput.value.trim()) || '';
+      ui.btnExportLibrary.disabled = busy || !hasItems || name.length === 0;
+    }
+  }
+
+  function applyItemsToUI(items, { origin = null, statusMessage = '', statusError = false } = {}) {
+    state.currentItems = Array.isArray(items) ? items : [];
+    if (ui.results) ui.results.innerHTML = '';
+    resultsStore.clear();
+
+    for (const item of state.currentItems) {
+      const card = renderCard(item);
+      item.card = card;
+      const initialCaption = typeof item.initialCaption === 'string' ? item.initialCaption : '';
+      resultsStore.set(item.name, { caption: initialCaption, error: null });
+      if (initialCaption) {
+        setCardCaption(card, initialCaption);
+      }
+    }
+
+    updateSaveZipButton();
+    setDatasetOrigin(origin);
+    if (statusMessage !== undefined) {
+      setDatasetStatus(statusMessage, statusError);
+    }
+    updateDatasetControlsDisabled();
+  }
+
+  async function fetchJson(url, options) {
+    const response = await fetch(url, options);
+    if (!response.ok) {
+      let message = '';
+      try {
+        message = await response.text();
+      } catch { }
+      message = message && message.trim() ? message.trim() : `Request failed with status ${response.status}`;
+      throw new Error(message);
+    }
+    return response.json();
+  }
 
   // Presets helpers
   function defaultPresets() {
@@ -344,6 +481,7 @@ EXAMPLES:
     ui.files.disabled = running;
     ui.modelId.disabled = running;
     if (ui.btnClearAllCaptions) ui.btnClearAllCaptions.disabled = running;
+    updateDatasetControlsDisabled();
   }
 
   ui.btnClear.addEventListener('click', () => {
@@ -358,6 +496,8 @@ EXAMPLES:
     state.currentItems = [];
     state.refreshSeq = 0;
     resultsStore.clear();
+    setDatasetOrigin(null);
+    setDatasetStatus('');
     updateSaveZipButton();
   });
 
@@ -507,9 +647,7 @@ EXAMPLES:
 
     if (inputFiles.length === 0) {
       if (seq !== state.refreshSeq) return;
-      state.currentItems = [];
-      ui.results.innerHTML = '';
-      resultsStore.clear();
+      applyItemsToUI([], { origin: null, statusMessage: '' });
       ui.progressBar.value = 0;
       ui.progressText.textContent = 'Idle';
       ui.progressText.className = '';
@@ -520,37 +658,24 @@ EXAMPLES:
     ui.progressText.textContent = 'Preparing preview...';
     ui.progressText.className = 'processing';
     ui.progressBar.value = 0;
+    setDatasetStatus('Loading local files…');
 
     try {
-      const { items, captionMap } = await buildItemsFromFiles(inputFiles);
+      const { items } = await buildItemsFromFiles(inputFiles);
       if (seq !== state.refreshSeq) return;
-      state.currentItems = items;
-      ui.results.innerHTML = '';
-      resultsStore.clear();
-
-      for (const item of items) {
-        const card = renderCard(item);
-        item.card = card;
-        resultsStore.set(item.name, { caption: '', error: null });
-      }
-
-      for (const item of items) {
-        const baseKey = getBaseFilename(item.name || '').toLowerCase();
-        if (captionMap.has(baseKey) && item.card) {
-          const text = captionMap.get(baseKey);
-          if (typeof text === 'string' && text.length > 0) {
-            setCardCaption(item.card, text);
-          }
-        }
-      }
-
+      applyItemsToUI(items, {
+        origin: { type: SOURCE_TYPES.UPLOAD, label: 'Local files' },
+        statusMessage: `Loaded ${items.length} file${items.length === 1 ? '' : 's'} from local files.`,
+      });
       ui.progressText.textContent = 'Files ready';
       ui.progressText.className = 'success';
     } catch (error) {
       if (seq !== state.refreshSeq) return;
-      state.currentItems = [];
-      ui.results.innerHTML = '';
-      resultsStore.clear();
+      applyItemsToUI([], {
+        origin: null,
+        statusMessage: 'Error preparing files: ' + (error?.message || 'Unknown error'),
+        statusError: true,
+      });
       ui.progressText.textContent = 'Error preparing files: ' + (error?.message || 'Unknown error');
       ui.progressText.className = 'error';
     } finally {
@@ -584,17 +709,280 @@ EXAMPLES:
     for (const file of mediaInputs) {
 
       if (isImage(file)) {
+        const relativePath = normalizeRelativePath(file.webkitRelativePath || file.name);
+        const displayName = relativePath || file.name || `image_${items.length + 1}`;
+        const name = makeItemName(SOURCE_TYPES.UPLOAD, relativePath, displayName);
         const dataUrl = await readFileAsDataURL(file);
-        items.push({ kind: 'image', name: file.name, type: file.type, dataUrl });
+        const baseKey = getBaseFilename(displayName).toLowerCase();
+        items.push({
+          kind: 'image',
+          name,
+          displayName,
+          type: file.type || 'image/png',
+          dataUrl,
+          file,
+          source: SOURCE_TYPES.UPLOAD,
+          relativePath,
+          initialCaption: captionMap.get(baseKey) || '',
+        });
       } else if (isVideo(file)) {
-        items.push({ kind: 'video', name: file.name, type: file.type, dataUrls: null, file });
+        const relativePath = normalizeRelativePath(file.webkitRelativePath || file.name);
+        const displayName = relativePath || file.name || `video_${items.length + 1}`;
+        const name = makeItemName(SOURCE_TYPES.UPLOAD, relativePath, displayName);
+        const baseKey = getBaseFilename(displayName).toLowerCase();
+        items.push({
+          kind: 'video',
+          name,
+          displayName,
+          type: file.type || 'video/mp4',
+          dataUrls: null,
+          file,
+          source: SOURCE_TYPES.UPLOAD,
+          relativePath,
+          initialCaption: captionMap.get(baseKey) || '',
+        });
       }
     }
 
-    return { items, captionMap };
+    return { items };
   }
 
   ui.files?.addEventListener('change', () => { refreshItemsFromFiles(); });
+
+  function createItemsFromServer(entries, { sourceType, libraryName } = {}) {
+    if (!Array.isArray(entries)) return [];
+    return entries.map((entry, index) => {
+      const relativePath = normalizeRelativePath(entry?.relative_path || entry?.image_path || entry?.name || `item_${index + 1}`);
+      const displayName = relativePath || entry?.image_path || entry?.name || `item_${index + 1}`;
+      const name = makeItemName(sourceType, relativePath, displayName);
+      const kind = entry?.kind === 'video' ? 'video' : 'image';
+      return {
+        name,
+        displayName,
+        kind,
+        type: entry?.media_type || (kind === 'video' ? 'video/mp4' : 'image/png'),
+        dataUrl: kind === 'image' ? null : undefined,
+        dataUrls: null,
+        file: null,
+        remoteUrl: entry?.media_url || null,
+        source: sourceType,
+        relativePath,
+        libraryName: libraryName || null,
+        initialCaption: typeof entry?.caption_text === 'string' ? entry.caption_text : '',
+      };
+    });
+  }
+
+  async function loadActiveDataset() {
+    if (state.integrationBusy) return;
+    state.refreshSeq += 1;
+    setIntegrationBusy(true);
+    setDatasetStatus('Loading active training dataset…');
+    if (ui.files) ui.files.value = '';
+    try {
+      const data = await fetchJson('/SillyCaption/api/active/items');
+      const items = createItemsFromServer(data?.items || [], { sourceType: SOURCE_TYPES.ACTIVE });
+      applyItemsToUI(items, {
+        origin: { type: SOURCE_TYPES.ACTIVE, label: 'Active training dataset' },
+        statusMessage: items.length
+          ? `Loaded ${items.length} item${items.length === 1 ? '' : 's'} from the active training dataset.`
+          : 'Active training dataset is empty.',
+      });
+      if (ui.libraryNameInput) {
+        ui.libraryNameInput.value = '';
+      }
+      if (ui.progressBar) ui.progressBar.value = 0;
+      if (ui.progressText) {
+        ui.progressText.textContent = 'Idle';
+        ui.progressText.className = '';
+      }
+    } catch (error) {
+      setDatasetStatus(error?.message || 'Failed to load active dataset.', true);
+    } finally {
+      setIntegrationBusy(false);
+    }
+  }
+
+  function renderLibraryOptions() {
+    if (!ui.librarySelect) return;
+    const currentValue = ui.librarySelect.value;
+    ui.librarySelect.innerHTML = '';
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = state.libraryDatasets.length ? 'Select a dataset…' : 'No saved datasets';
+    ui.librarySelect.appendChild(placeholder);
+    for (const dataset of state.libraryDatasets) {
+      const option = document.createElement('option');
+      option.value = dataset.name;
+      const count = Number(dataset.media_count);
+      option.textContent = Number.isFinite(count) && count > 0 ? `${dataset.name} (${count})` : dataset.name;
+      ui.librarySelect.appendChild(option);
+    }
+    if (state.libraryDatasets.some((d) => d.name === currentValue)) {
+      ui.librarySelect.value = currentValue;
+    }
+    updateDatasetControlsDisabled();
+  }
+
+  async function refreshLibraryList({ quiet = false, skipBusyCheck = false } = {}) {
+    if (state.integrationBusy && !skipBusyCheck) return;
+    if (!quiet && !skipBusyCheck) {
+      setIntegrationBusy(true);
+    }
+    if (!quiet) setDatasetStatus('Refreshing library datasets…');
+    try {
+      const data = await fetchJson('/SillyCaption/api/library');
+      state.libraryDatasets = Array.isArray(data?.datasets) ? data.datasets : [];
+      renderLibraryOptions();
+      if (!quiet) setDatasetStatus('Library list updated.');
+    } catch (error) {
+      if (!quiet) setDatasetStatus(error?.message || 'Failed to refresh library list.', true);
+    } finally {
+      if (!quiet && !skipBusyCheck) {
+        setIntegrationBusy(false);
+      }
+    }
+  }
+
+  async function loadLibraryDataset() {
+    if (state.integrationBusy) return;
+    const datasetName = ui.librarySelect ? ui.librarySelect.value : '';
+    if (!datasetName) {
+      setDatasetStatus('Select a dataset to load from the library.', true);
+      return;
+    }
+    state.refreshSeq += 1;
+    setIntegrationBusy(true);
+    setDatasetStatus(`Loading library dataset “${datasetName}”…`);
+    if (ui.files) ui.files.value = '';
+    try {
+      const encoded = encodeURIComponent(datasetName);
+      const data = await fetchJson(`/SillyCaption/api/library/${encoded}/items`);
+      const items = createItemsFromServer(data?.items || [], {
+        sourceType: SOURCE_TYPES.LIBRARY,
+        libraryName: datasetName,
+      });
+      applyItemsToUI(items, {
+        origin: { type: SOURCE_TYPES.LIBRARY, label: `Library: ${datasetName}`, libraryName: datasetName },
+        statusMessage: items.length
+          ? `Loaded ${items.length} item${items.length === 1 ? '' : 's'} from “${datasetName}”.`
+          : `Library dataset “${datasetName}” is empty.`,
+      });
+      if (ui.libraryNameInput) {
+        ui.libraryNameInput.value = datasetName;
+      }
+      if (ui.progressBar) ui.progressBar.value = 0;
+      if (ui.progressText) {
+        ui.progressText.textContent = 'Idle';
+        ui.progressText.className = '';
+      }
+    } catch (error) {
+      setDatasetStatus(error?.message || `Failed to load “${datasetName}”.`, true);
+    } finally {
+      setIntegrationBusy(false);
+    }
+  }
+
+  function buildExportFormData({ datasetName } = {}) {
+    if (!hasCurrentItems()) {
+      throw new Error('Load or upload a dataset before exporting.');
+    }
+    const formData = new FormData();
+    const payload = { items: [] };
+    if (datasetName) {
+      payload.dataset_name = datasetName;
+    }
+    let uploadIndex = 0;
+    for (const item of state.currentItems) {
+      const entry = resultsStore.get(item.name) || { caption: '' };
+      const record = {
+        name: item.displayName || item.name,
+        relative_path: item.relativePath || '',
+        caption: typeof entry.caption === 'string' ? entry.caption : '',
+        source_type: item.source || SOURCE_TYPES.UPLOAD,
+      };
+      if (item.source === SOURCE_TYPES.LIBRARY) {
+        record.library_name = item.libraryName || (state.datasetOrigin && state.datasetOrigin.libraryName) || '';
+      }
+      if (item.source === SOURCE_TYPES.UPLOAD) {
+        if (!item.file) {
+          throw new Error(`Missing file data for ${item.displayName || item.name}`);
+        }
+        const field = `file_${uploadIndex++}`;
+        record.upload_field = field;
+        formData.append(field, item.file, item.displayName || item.file.name || `file_${uploadIndex}`);
+      }
+      payload.items.push(record);
+    }
+    formData.append('payload', JSON.stringify(payload));
+    return formData;
+  }
+
+  async function exportToActiveDataset() {
+    if (state.integrationBusy) return;
+    let formData;
+    try {
+      formData = buildExportFormData();
+    } catch (error) {
+      setDatasetStatus(error?.message || 'Unable to prepare dataset for export.', true);
+      return;
+    }
+    setIntegrationBusy(true);
+    setDatasetStatus('Exporting to active training dataset…');
+    try {
+      const response = await fetch('/SillyCaption/api/export/active', { method: 'POST', body: formData });
+      if (!response.ok) {
+        let message = '';
+        try { message = await response.text(); } catch { }
+        message = message && message.trim() ? message.trim() : `Export failed with status ${response.status}`;
+        throw new Error(message);
+      }
+      const result = await response.json().catch(() => ({}));
+      setDatasetStatus(result?.message || 'Active training dataset updated.');
+    } catch (error) {
+      setDatasetStatus(error?.message || 'Failed to export to active dataset.', true);
+    } finally {
+      setIntegrationBusy(false);
+    }
+  }
+
+  async function exportToLibraryDataset() {
+    if (state.integrationBusy) return;
+    const datasetName = ui.libraryNameInput ? ui.libraryNameInput.value.trim() : '';
+    if (!datasetName) {
+      setDatasetStatus('Enter a name before saving to the library.', true);
+      return;
+    }
+    let formData;
+    try {
+      formData = buildExportFormData({ datasetName });
+    } catch (error) {
+      setDatasetStatus(error?.message || 'Unable to prepare dataset for export.', true);
+      return;
+    }
+    setIntegrationBusy(true);
+    setDatasetStatus(`Saving dataset to library as “${datasetName}”…`);
+    try {
+      const response = await fetch('/SillyCaption/api/export/library', { method: 'POST', body: formData });
+      if (!response.ok) {
+        let message = '';
+        try { message = await response.text(); } catch { }
+        message = message && message.trim() ? message.trim() : `Export failed with status ${response.status}`;
+        throw new Error(message);
+      }
+      const result = await response.json().catch(() => ({}));
+      setDatasetStatus(result?.message || `Saved dataset “${datasetName}” to the library.`);
+      await refreshLibraryList({ quiet: true, skipBusyCheck: true });
+      if (ui.librarySelect) {
+        ui.librarySelect.value = datasetName;
+        updateDatasetControlsDisabled();
+      }
+    } catch (error) {
+      setDatasetStatus(error?.message || 'Failed to save dataset to library.', true);
+    } finally {
+      setIntegrationBusy(false);
+    }
+  }
 
   function getCardText(card) {
     if (!card) return '';
@@ -718,6 +1106,35 @@ EXAMPLES:
 
   ui.btnCaption?.addEventListener('click', () => { startCaptioning({ onlyUncaptioned: false }); });
   ui.btnCaptionUncaptioned?.addEventListener('click', () => { startCaptioning({ onlyUncaptioned: true }); });
+  ui.btnImportActive?.addEventListener('click', () => {
+    if (state.running) {
+      setDatasetStatus('Wait for captioning to finish before changing datasets.', true);
+      return;
+    }
+    loadActiveDataset();
+  });
+  ui.btnRefreshLibrary?.addEventListener('click', () => {
+    refreshLibraryList({ quiet: false }).catch(() => {});
+  });
+  ui.btnLoadLibrary?.addEventListener('click', () => {
+    if (state.running) {
+      setDatasetStatus('Wait for captioning to finish before changing datasets.', true);
+      return;
+    }
+    loadLibraryDataset();
+  });
+  ui.btnExportActive?.addEventListener('click', () => {
+    exportToActiveDataset();
+  });
+  ui.btnExportLibrary?.addEventListener('click', () => {
+    exportToLibraryDataset();
+  });
+  ui.libraryNameInput?.addEventListener('input', () => {
+    updateDatasetControlsDisabled();
+  });
+  ui.librarySelect?.addEventListener('change', () => {
+    updateDatasetControlsDisabled();
+  });
 
   function clamp(n, min, max) { return Math.max(min, Math.min(max, n)); }
 
@@ -772,6 +1189,42 @@ EXAMPLES:
       reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
       reader.readAsText(file);
     });
+  }
+
+  function blobToDataUrl(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error('Failed to read blob'));
+      reader.onload = () => resolve(reader.result);
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  async function ensureItemData(item) {
+    if (!item) return;
+    if (item.kind === 'image') {
+      if (item.dataUrl) return;
+      if (!item.remoteUrl) return;
+      const response = await fetch(item.remoteUrl);
+      if (!response.ok) {
+        throw new Error(`Failed to download image (${response.status})`);
+      }
+      const blob = await response.blob();
+      item.type = blob.type || item.type || 'image/png';
+      item.dataUrl = await blobToDataUrl(blob);
+    } else if (item.kind === 'video') {
+      if (item.file) return;
+      if (!item.remoteUrl) return;
+      const response = await fetch(item.remoteUrl);
+      if (!response.ok) {
+        throw new Error(`Failed to download video (${response.status})`);
+      }
+      const blob = await response.blob();
+      const fileName = item.displayName || item.relativePath || item.name || 'video.mp4';
+      const mime = blob.type || item.type || 'video/mp4';
+      item.file = new File([blob], fileName, { type: mime });
+      item.type = mime;
+    }
   }
 
   async function extractVideoFrames(file, framesPerVideo) {
@@ -893,13 +1346,19 @@ EXAMPLES:
     setTimeout(autoResize, 0);
     if (item.kind === 'image') {
       const img = document.createElement('img');
-      img.src = item.dataUrl;
-      img.alt = item.name;
+      const src = item.dataUrl || item.remoteUrl || '';
+      if (src) img.src = src;
+      img.alt = item.displayName || item.name || 'image';
+      img.loading = 'lazy';
       left.appendChild(img);
     } else if (item.kind === 'video') {
       const video = document.createElement('video');
+      let objectUrl = null;
       if (item.file) {
-        video.src = URL.createObjectURL(item.file);
+        objectUrl = URL.createObjectURL(item.file);
+        video.src = objectUrl;
+      } else if (item.remoteUrl) {
+        video.src = item.remoteUrl;
       }
       video.controls = true;
       video.muted = true;
@@ -912,8 +1371,11 @@ EXAMPLES:
       const observer = new MutationObserver((mutations) => {
         mutations.forEach((mutation) => {
           mutation.removedNodes.forEach((node) => {
-            if (node === card && video.src && video.src.startsWith('blob:')) {
-              URL.revokeObjectURL(video.src);
+            if (node === card) {
+              if (objectUrl) {
+                URL.revokeObjectURL(objectUrl);
+                objectUrl = null;
+              }
               observer.disconnect();
             }
           });
@@ -927,8 +1389,9 @@ EXAMPLES:
     metaLeft.className = 'meta-left';
     const fileNameEl = document.createElement('span');
     fileNameEl.className = 'file-name';
-    fileNameEl.textContent = `${item.name}`;
-    fileNameEl.title = item.name; // show full name on hover
+    const displayName = item.displayName || item.name || '';
+    fileNameEl.textContent = `${displayName}`;
+    fileNameEl.title = displayName; // show full name on hover
     metaLeft.appendChild(fileNameEl);
 
     const metaRight = document.createElement('div');
@@ -1186,6 +1649,8 @@ EXAMPLES:
 
   async function captionItem({ apiKey, model, systemPrompt, item, signal, retryLimit, targetMp, framesPerVideo }) {
     let processedDataUrls;
+
+    await ensureItemData(item);
 
     if (item && item.kind === 'video' && (!Array.isArray(item.dataUrls) || item.dataUrls.length === 0)) {
       const frameCount = Number.isFinite(framesPerVideo) && framesPerVideo > 0 ? framesPerVideo : parseInt(ui.framesPerVideo.value, 10) || 1;
@@ -1549,6 +2014,11 @@ Instructions: ${systemPrompt}`;
     }
 
   }
+
+  setDatasetOrigin(null);
+  setDatasetStatus('');
+  updateDatasetControlsDisabled();
+  refreshLibraryList({ quiet: true, skipBusyCheck: true }).catch(() => {});
 
   // Initialize persistence (API key, presets) once DOM elements are ready
   initPersistence();

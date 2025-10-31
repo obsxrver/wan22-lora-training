@@ -79,9 +79,15 @@
             <h1>Silly Caption</h1>
             <div class="subtitle">Serious Edition</div>
         </div>
-        <a href="https://obsxrver.github.io" target="_blank" rel="noreferrer noopener" class="profile-link">
-            <img src="static/pfp.png">
-        </a>
+        <div class="header-right">
+            <nav class="top-nav" aria-label="Main navigation">
+                <a href="/" class="nav-link">Training Dashboard</a>
+                <a href="/SillyCaption" class="nav-link nav-link--active" aria-current="page">SillyCaption</a>
+            </nav>
+            <a href="https://obsxrver.github.io" target="_blank" rel="noreferrer noopener" class="profile-link">
+                <img src="static/pfp.png" alt="obsxrver profile" />
+            </a>
+        </div>
     </header>
     <main>
         <section class="controls">
@@ -198,6 +204,43 @@
                 <button id="btnClearAllCaptions">Clear All Captions</button>
             </div>
             <div class="hint">Your API key is only used locally in this browser tab.</div>
+        </section>
+
+        <section class="dataset-integration">
+            <div class="dataset-status">
+                <div class="dataset-status-row">
+                    <span class="dataset-status-label">Current dataset</span>
+                    <span id="datasetSourceLabel" class="badge dataset-source-badge">No dataset loaded</span>
+                </div>
+                <div id="datasetStatusMessage" class="dataset-status-message" aria-live="polite"></div>
+            </div>
+            <div class="dataset-actions">
+                <div class="dataset-actions-group">
+                    <div class="dataset-actions-row">
+                        <button id="btnImportActive">Load Active Training Dataset</button>
+                        <button id="btnExportActive" disabled>Export to Active Dataset</button>
+                    </div>
+                    <div class="dataset-hint">Import the dataset currently used by training or push your captions back to it.</div>
+                </div>
+                <div class="dataset-actions-group">
+                    <div class="library-row">
+                        <label for="librarySelect">Library datasets</label>
+                        <div class="library-select-row">
+                            <select id="librarySelect" aria-label="Saved datasets"></select>
+                            <button id="btnLoadLibrary">Load</button>
+                            <button id="btnRefreshLibrary" class="secondary">Refresh</button>
+                        </div>
+                    </div>
+                    <div class="library-row">
+                        <label for="libraryNameInput">Save to library</label>
+                        <div class="library-save-row">
+                            <input type="text" id="libraryNameInput" placeholder="Dataset name" autocomplete="off">
+                            <button id="btnExportLibrary" disabled>Save</button>
+                        </div>
+                    </div>
+                    <div class="dataset-hint">Datasets are stored on this instance inside <code>SillyCaption/Datasets</code>.</div>
+                </div>
+            </div>
         </section>
 
         <section class="status">
