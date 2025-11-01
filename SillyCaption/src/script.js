@@ -202,6 +202,18 @@
     updateDatasetControlsDisabled();
   }
 
+  function removeItemFromState(item, card) {
+    if (!item) return;
+    state.currentItems = state.currentItems.filter((entry) => entry && entry.name !== item.name);
+    resultsStore.delete(item.name);
+    if (card && card.parentElement === ui.results) {
+      card.remove();
+    }
+    updateSaveZipButton();
+    updateDownloadDatasetZipButton();
+    updateDatasetControlsDisabled();
+  }
+
   async function fetchJson(url, options) {
     const response = await fetch(url, options);
     if (!response.ok) {
@@ -785,8 +797,11 @@ EXAMPLES:
     });
   }
 
-  async function loadActiveDataset() {
+  async function loadActiveDataset(options = {}) {
     if (state.integrationBusy) return;
+    const hasOverride = Object.prototype.hasOwnProperty.call(options || {}, 'statusMessage');
+    const overrideMessage = hasOverride ? options.statusMessage : undefined;
+    const overrideError = hasOverride ? !!options.statusError : false;
     state.refreshSeq += 1;
     setIntegrationBusy(true);
     setDatasetStatus('Loading active training dataset…');
@@ -794,11 +809,13 @@ EXAMPLES:
     try {
       const data = await fetchJson('/SillyCaption/api/active/items');
       const items = createItemsFromServer(data?.items || [], { sourceType: SOURCE_TYPES.ACTIVE });
+      const defaultMessage = items.length
+        ? `Loaded ${items.length} item${items.length === 1 ? '' : 's'} from the active training dataset.`
+        : 'Active training dataset is empty.';
       applyItemsToUI(items, {
         origin: { type: SOURCE_TYPES.ACTIVE, label: 'Active training dataset' },
-        statusMessage: items.length
-          ? `Loaded ${items.length} item${items.length === 1 ? '' : 's'} from the active training dataset.`
-          : 'Active training dataset is empty.',
+        statusMessage: hasOverride ? overrideMessage : defaultMessage,
+        statusError: hasOverride ? overrideError : false,
       });
       if (ui.libraryNameInput) {
         ui.libraryNameInput.value = '';
@@ -1409,6 +1426,24 @@ EXAMPLES:
 
     const metaRight = document.createElement('div');
     metaRight.className = 'meta-right';
+    const btnRemove = document.createElement('button');
+    btnRemove.className = 'btnRemove icon-btn';
+    btnRemove.innerHTML = `
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <polyline points="3 6 5 6 21 6" />
+        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+        <path d="M10 11v6" />
+        <path d="M14 11v6" />
+        <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+      </svg>`;
+    btnRemove.setAttribute('aria-label', 'Remove from dataset');
+    btnRemove.title = 'Remove from dataset';
+    btnRemove.type = 'button';
+    btnRemove.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      handleRemoveItem(card, item);
+    });
     const btnClearCaption = document.createElement('button');
     btnClearCaption.className = 'btnClearCaption icon-btn';
     btnClearCaption.innerHTML = `
@@ -1436,6 +1471,7 @@ EXAMPLES:
     btnReroll.setAttribute('aria-label', 'Re-roll caption');
     btnReroll.title = 'Re-roll caption';
     btnReroll.addEventListener('click', () => rerollCaption(card, item));
+    metaRight.appendChild(btnRemove);
     metaRight.appendChild(btnClearCaption);
     metaRight.appendChild(btnCopy);
     metaRight.appendChild(btnReroll);
@@ -1453,8 +1489,75 @@ EXAMPLES:
     card._btnClearCaption = btnClearCaption;
     card._btnCopy = btnCopy;
     card._btnReroll = btnReroll;
+    card._btnRemove = btnRemove;
     card._item = item;
     return card;
+  }
+
+  async function handleRemoveItem(card, item) {
+    if (!card || !item) return;
+    if (state.running) {
+      setDatasetStatus('Wait for captioning to finish before removing items.', true);
+      return;
+    }
+    if (state.integrationBusy) {
+      setDatasetStatus('Another dataset operation is in progress. Please wait.', true);
+      return;
+    }
+    const button = card._btnRemove;
+    const name = item.displayName || item.relativePath || item.name || 'item';
+    const confirmed = window.confirm(
+      `Remove “${name}” from the dataset? This will delete the media file and any associated captions.`
+    );
+    if (!confirmed) {
+      return;
+    }
+    if (button) {
+      button.disabled = true;
+    }
+    card.classList.add('removing');
+    try {
+      if (item.source === SOURCE_TYPES.ACTIVE && item.relativePath) {
+        let successMessage = '';
+        try {
+          setIntegrationBusy(true);
+          setDatasetStatus(`Removing “${name}” from active dataset…`);
+          const response = await fetch('/dataset/delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ media_path: item.relativePath }),
+          });
+          let result = {};
+          try {
+            result = await response.json();
+          } catch (error) {
+            result = {};
+          }
+          if (!response.ok) {
+            const detail = result?.detail || result?.message || 'Failed to remove media from active dataset.';
+            throw new Error(detail);
+          }
+          successMessage = result?.message || `Removed “${name}” from active dataset.`;
+        } finally {
+          setIntegrationBusy(false);
+        }
+        await loadActiveDataset({ statusMessage: successMessage });
+        return;
+      }
+
+      removeItemFromState(item, card);
+      const remaining = state.currentItems.length;
+      const suffix = remaining === 1 ? 'item remains in the current list.' : 'items remain in the current list.';
+      const summary = remaining === 0 ? 'No items remain in the current list.' : `${remaining} ${suffix}`;
+      setDatasetStatus(`Removed “${name}”. ${summary}`);
+    } catch (error) {
+      setDatasetStatus(error?.message || 'Failed to remove item.', true);
+    } finally {
+      if (button) {
+        button.disabled = false;
+      }
+      card.classList.remove('removing');
+    }
   }
 
   function setCardCaption(card, text) {

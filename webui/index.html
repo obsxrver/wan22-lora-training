@@ -213,6 +213,47 @@
         display: flex;
         flex-direction: column;
         min-height: 100%;
+        position: relative;
+        transition: opacity 0.2s ease, transform 0.2s ease;
+      }
+
+      .dataset-card--removing {
+        opacity: 0.5;
+        pointer-events: none;
+      }
+
+      .dataset-card-actions {
+        position: absolute;
+        top: 0.6rem;
+        right: 0.6rem;
+        display: flex;
+        gap: 0.35rem;
+        z-index: 1;
+      }
+
+      .dataset-card-actions button {
+        appearance: none;
+        border: 1px solid rgba(138, 180, 248, 0.25);
+        background: rgba(18, 18, 18, 0.65);
+        color: var(--text);
+        border-radius: 8px;
+        padding: 0.2rem 0.55rem;
+        font-size: 0.75rem;
+        line-height: 1.2;
+        cursor: pointer;
+        transition: background 0.2s ease, border-color 0.2s ease;
+      }
+
+      .dataset-card-actions button:hover,
+      .dataset-card-actions button:focus-visible {
+        border-color: rgba(138, 180, 248, 0.5);
+        background: rgba(138, 180, 248, 0.3);
+        outline: none;
+      }
+
+      .dataset-card-actions button:disabled {
+        opacity: 0.6;
+        cursor: progress;
       }
 
       .dataset-card-media {
@@ -626,6 +667,54 @@
         datasetMessage.style.color = isError ? '#ff8a80' : 'var(--muted)';
       }
 
+      async function handleDatasetItemRemoval(mediaPath, card, button) {
+        if (!mediaPath) {
+          return;
+        }
+        const segments = mediaPath.split('/');
+        const displayName = segments[segments.length - 1] || mediaPath;
+        const confirmed = window.confirm(
+          `Remove “${displayName}” from the dataset? This will delete the media file and its captions.`
+        );
+        if (!confirmed) {
+          return;
+        }
+        if (button) {
+          button.disabled = true;
+        }
+        if (card) {
+          card.classList.add('dataset-card--removing');
+        }
+        try {
+          const response = await fetch('/dataset/delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ media_path: mediaPath }),
+          });
+          let result = {};
+          try {
+            result = await response.json();
+          } catch (error) {
+            result = {};
+          }
+          if (!response.ok) {
+            const detail = result?.detail || result?.message || 'Failed to remove media from dataset.';
+            throw new Error(detail);
+          }
+          const message = result?.message || `Removed “${displayName}” from the dataset.`;
+          await refreshDatasetPreview({ message });
+        } catch (error) {
+          setDatasetMessage(error?.message || 'Failed to remove media from dataset.', true);
+        } finally {
+          if (button) {
+            button.disabled = false;
+          }
+          if (card) {
+            card.classList.remove('dataset-card--removing');
+          }
+        }
+      }
+
       function createDatasetCard(item) {
         const card = document.createElement('article');
         card.className = 'dataset-card';
@@ -680,6 +769,22 @@
         }
         card.appendChild(mediaElement);
 
+        if (mediaPath) {
+          const actions = document.createElement('div');
+          actions.className = 'dataset-card-actions';
+          const removeButton = document.createElement('button');
+          removeButton.type = 'button';
+          removeButton.className = 'dataset-card-remove';
+          removeButton.textContent = 'Remove';
+          removeButton.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            handleDatasetItemRemoval(mediaPath, card, removeButton);
+          });
+          actions.appendChild(removeButton);
+          card.appendChild(actions);
+        }
+
         const body = document.createElement('div');
         body.className = 'dataset-card-body';
 
@@ -724,7 +829,8 @@
         datasetGrid.appendChild(fragment);
       }
 
-      async function refreshDatasetPreview() {
+      async function refreshDatasetPreview(options = {}) {
+        const { message: overrideMessage = null, isError = false } = options || {};
         if (!datasetGrid || !datasetMessage) {
           return;
         }
@@ -739,13 +845,18 @@
           const data = await response.json();
           const items = Array.isArray(data?.items) ? data.items : [];
           if (!items.length) {
-            setDatasetMessage('No dataset files uploaded yet.');
+            const emptyMessage = overrideMessage ?? 'No dataset files uploaded yet.';
+            setDatasetMessage(emptyMessage, overrideMessage != null ? isError : false);
             return;
           }
           renderDatasetPreview(items);
           const totalValue = Number(data?.total);
           const total = Number.isFinite(totalValue) && totalValue >= 0 ? totalValue : items.length;
-          setDatasetMessage(`Showing ${total} media file${total === 1 ? '' : 's'} from the current dataset.`);
+          if (overrideMessage != null) {
+            setDatasetMessage(overrideMessage, isError);
+          } else {
+            setDatasetMessage(`Showing ${total} media file${total === 1 ? '' : 's'} from the current dataset.`);
+          }
         } catch (error) {
           setDatasetMessage(error?.message || 'Failed to load dataset preview.', true);
         } finally {

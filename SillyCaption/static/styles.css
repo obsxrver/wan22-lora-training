@@ -976,6 +976,12 @@ progress::-moz-progress-bar {
   min-width: 0; /* allow grid item to shrink */
 }
 
+.card.removing {
+  opacity: 0.55;
+  pointer-events: none;
+  filter: saturate(0.5);
+}
+
 .card::before {
   content: '';
   position: absolute;
@@ -1087,6 +1093,16 @@ progress::-moz-progress-bar {
   border: 1px solid var(--border);
   border-radius: 8px;
   box-shadow: none;
+}
+
+.btnRemove {
+  color: #fca5a5;
+  border-color: rgba(252, 165, 165, 0.4);
+}
+
+.btnRemove:hover {
+  background: rgba(248, 113, 113, 0.15);
+  color: #fecaca;
 }
 
 .icon-btn:hover {
