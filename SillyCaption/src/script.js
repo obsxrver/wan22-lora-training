@@ -71,6 +71,152 @@
     btnExportLibrary: el('btnExportLibrary'),
   };
 
+  const isCoarsePointer = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+  const videoMetadataUtils = window.VideoMetadataUtils || {};
+  let {
+    formatNumber,
+    formatDuration,
+    createTooltipController,
+    normalizeVideoMetadata,
+  } = videoMetadataUtils;
+
+  if (typeof formatNumber !== 'function') {
+    formatNumber = (value, digits = 2) => {
+      if (!Number.isFinite(value)) {
+        return 'Unknown';
+      }
+      return Number(value)
+        .toFixed(digits)
+        .replace(/\.0+$/, '')
+        .replace(/(\.\d*?)0+$/, '$1')
+        .replace(/\.$/, '');
+    };
+  }
+
+  if (typeof formatDuration !== 'function') {
+    formatDuration = (seconds) => {
+      if (!Number.isFinite(seconds) || seconds < 0) {
+        return 'Unknown';
+      }
+      if (seconds >= 3600) {
+        const hours = Math.floor(seconds / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        const secs = Math.round(seconds % 60);
+        return `${hours}h ${minutes}m ${secs}s`;
+      }
+      if (seconds >= 60) {
+        const minutes = Math.floor(seconds / 60);
+        const secs = seconds % 60;
+        const secsText = secs >= 10 ? Math.round(secs).toString() : secs.toFixed(1);
+        return `${minutes}m ${secsText.replace(/\.0$/, '')}s`;
+      }
+      return seconds < 10 ? `${seconds.toFixed(2)} s` : `${seconds.toFixed(1)} s`;
+    };
+  }
+
+  if (typeof createTooltipController !== 'function') {
+    createTooltipController = ({ document: doc }) => ({
+      createWarningIcon(type, tooltipText) {
+        const fallback = doc.createElement('span');
+        fallback.className = `video-warning video-warning--${type}`;
+        fallback.textContent = tooltipText;
+        return fallback;
+      },
+      destroy() {},
+      getActiveTrigger() {
+        return null;
+      },
+      clearActiveTrigger() {},
+    });
+  }
+
+  if (typeof normalizeVideoMetadata !== 'function') {
+    normalizeVideoMetadata = (metadata) =>
+      metadata && typeof metadata === 'object' ? metadata : null;
+  }
+
+  const tooltipController = createTooltipController({
+    document,
+    isCoarsePointer,
+    iconSize: 16,
+  });
+  const { createWarningIcon } = tooltipController;
+
+  function extractVideoMetadata(metadata) {
+    return normalizeVideoMetadata(metadata);
+  }
+
+  function createVideoMetadataComponent(initialMetadata) {
+    const container = document.createElement('div');
+    container.className = 'video-meta';
+    const resolutionRow = document.createElement('div');
+    resolutionRow.className = 'video-meta-row';
+    const durationRow = document.createElement('div');
+    durationRow.className = 'video-meta-row';
+    const fpsRow = document.createElement('div');
+    fpsRow.className = 'video-meta-row';
+    container.append(resolutionRow, durationRow, fpsRow);
+
+    const apply = (rawMetadata) => {
+      const metadata = extractVideoMetadata(rawMetadata) || {};
+      const width = Number(metadata.width);
+      const height = Number(metadata.height);
+      const duration = Number(metadata.duration);
+      const fps = Number(metadata.fps);
+
+      function setRow(rowElement, label, value) {
+        rowElement.innerHTML = '';
+        const labelSpan = document.createElement('span');
+        labelSpan.className = 'video-meta-label';
+        labelSpan.textContent = `${label}:`;
+        const valueSpan = document.createElement('span');
+        valueSpan.className = 'video-meta-value';
+        valueSpan.textContent = value;
+        rowElement.append(labelSpan, valueSpan);
+        return rowElement;
+      }
+
+      const hasResolution = Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0;
+      setRow(
+        resolutionRow,
+        'Resolution',
+        hasResolution ? `${Math.round(width)}×${Math.round(height)}` : 'Unknown'
+      );
+
+      setRow(
+        durationRow,
+        'Duration',
+        Number.isFinite(duration) && duration > 0 ? formatDuration(duration) : 'Unknown'
+      );
+      if (Number.isFinite(duration) && duration > 5) {
+        durationRow.appendChild(
+          createWarningIcon('duration', 'Only the first 5 seconds of the video will be used.')
+        );
+      }
+
+      setRow(
+        fpsRow,
+        'FPS',
+        Number.isFinite(fps) && fps > 0 ? formatNumber(fps, 2) : 'Unknown'
+      );
+      if (Number.isFinite(fps) && Math.abs(fps - 16) > 1) {
+        fpsRow.appendChild(
+          createWarningIcon(
+            'fps',
+            'WAN 2.2 was trained on 16 FPS. Videos over or under 16 FPS will cause slow-motion / sped up issues in the result.'
+          )
+        );
+      }
+    };
+
+    apply(initialMetadata);
+
+    return {
+      element: container,
+      update: apply,
+    };
+  }
+
   // Persistent storage keys
   const storageKeys = {
     apiKey: 'sc_api_key',
@@ -764,6 +910,7 @@ EXAMPLES:
           source: SOURCE_TYPES.UPLOAD,
           relativePath,
           initialCaption: captionMap.get(baseKey) || '',
+          videoMetadata: null,
         });
       }
     }
@@ -780,6 +927,7 @@ EXAMPLES:
       const displayName = relativePath || entry?.image_path || entry?.name || `item_${index + 1}`;
       const name = makeItemName(sourceType, relativePath, displayName);
       const kind = entry?.kind === 'video' ? 'video' : 'image';
+      const videoMetadata = extractVideoMetadata(entry?.video_metadata ?? null);
       return {
         name,
         displayName,
@@ -793,6 +941,7 @@ EXAMPLES:
         relativePath,
         libraryName: libraryName || null,
         initialCaption: typeof entry?.caption_text === 'string' ? entry.caption_text : '',
+        videoMetadata,
       };
     });
   }
@@ -1397,6 +1546,30 @@ EXAMPLES:
       video.style.maxWidth = '100%';
       video.style.maxHeight = '180px';
       left.appendChild(video);
+
+      const metadataComponent = createVideoMetadataComponent(item.videoMetadata || null);
+      left.appendChild(metadataComponent.element);
+
+      video.addEventListener('loadedmetadata', () => {
+        const updatedMetadata = {
+          width:
+            Number.isFinite(video.videoWidth) && video.videoWidth > 0
+              ? video.videoWidth
+              : item.videoMetadata?.width ?? null,
+          height:
+            Number.isFinite(video.videoHeight) && video.videoHeight > 0
+              ? video.videoHeight
+              : item.videoMetadata?.height ?? null,
+          duration:
+            Number.isFinite(video.duration) && video.duration > 0
+              ? video.duration
+              : item.videoMetadata?.duration ?? null,
+          fps: item.videoMetadata?.fps ?? null,
+        };
+        item.videoMetadata = updatedMetadata;
+        metadataComponent.update(updatedMetadata);
+      });
+
       // Revoke object URL when card is removed from DOM
       const observer = new MutationObserver((mutations) => {
         mutations.forEach((mutation) => {

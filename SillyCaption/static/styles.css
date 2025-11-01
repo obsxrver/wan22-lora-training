@@ -1030,11 +1030,107 @@ progress::-moz-progress-bar {
   transform: scale(1.02);
 }
 
-.caption { 
-  padding: 8px; 
-  font-size: 14px; 
-  line-height: 1.6; 
-  white-space: pre-wrap; 
+.video-meta {
+  display: grid;
+  gap: 6px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.video-meta-row {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.video-meta-label {
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.video-meta-value {
+  color: var(--text-secondary);
+}
+
+.video-warning {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: rgba(250, 204, 21, 0.16);
+  color: #facc15;
+  cursor: pointer;
+  transition: transform 0.15s ease;
+  flex-shrink: 0;
+}
+
+.video-warning--fps {
+  background: rgba(239, 68, 68, 0.18);
+  color: #f87171;
+}
+
+.video-warning svg {
+  width: 16px;
+  height: 16px;
+}
+
+.video-warning:hover {
+  transform: translateY(-1px);
+}
+
+.video-warning-tooltip {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(16, 16, 16, 0.95);
+  color: var(--text-secondary);
+  padding: 8px 10px;
+  border-radius: 10px;
+  box-shadow: 0 16px 30px rgba(0, 0, 0, 0.45);
+  font-size: 0.75rem;
+  line-height: 1.35;
+  width: max-content;
+  max-width: 260px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+  z-index: 40;
+  text-align: left;
+}
+
+.video-warning-tooltip::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border-width: 6px;
+  border-style: solid;
+  border-color: rgba(16, 16, 16, 0.95) transparent transparent transparent;
+}
+
+.video-warning-tooltip-note {
+  display: block;
+  margin-top: 0.4rem;
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+.video-warning.tooltip-visible .video-warning-tooltip {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.caption {
+  padding: 8px;
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre-wrap;
   background: rgba(16, 16, 16, 0.2);
   margin: 0;
   color: var(--text-secondary);

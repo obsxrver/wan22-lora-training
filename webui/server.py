@@ -1,13 +1,16 @@
 import asyncio
 import json
 import mimetypes
+import json
 import os
 import re
 import secrets
 import shutil
 import subprocess
 import tempfile
+import threading
 from collections import deque
+from fractions import Fraction
 from pathlib import Path
 from typing import Any, Dict, FrozenSet, List, Optional, Set
 
@@ -19,6 +22,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 from typing import Literal
 from urllib.parse import quote
+import tomllib
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RUN_SCRIPT = REPO_ROOT / "run_wan_training.sh"
@@ -61,6 +65,357 @@ CAPTION_EXTENSIONS = set(CAPTION_PRIORITY)
 CAPTION_PREVIEW_LIMIT = 500
 PROTECTED_DATASET_DIRS: FrozenSet[str] = frozenset({"cache", "videocache"})
 RANGE_HEADER_RE = re.compile(r"bytes=(\d+)-(\d+)?")
+
+VIDEO_METADATA_CACHE: Dict[str, Dict[str, Any]] = {}
+VIDEO_METADATA_LOCK = threading.Lock()
+VIDEO_TARGET_FPS = 16.0
+VIDEO_CONVERSION_TOLERANCE = 0.1
+PROTECTED_DATASET_PARTS = {part.lower() for part in PROTECTED_DATASET_DIRS}
+
+
+def _parse_fraction(value: Optional[str]) -> Optional[float]:
+    if not value:
+        return None
+    try:
+        fraction = Fraction(value)
+    except (ZeroDivisionError, ValueError):
+        return None
+    if fraction.denominator == 0:
+        return None
+    numeric = float(fraction)
+    if not numeric or numeric <= 0:
+        return None
+    return numeric
+
+
+def _clear_video_metadata_cache_entry(file_path: Path) -> None:
+    cache_key = str(file_path.resolve())
+    with VIDEO_METADATA_LOCK:
+        VIDEO_METADATA_CACHE.pop(cache_key, None)
+
+
+def _probe_video_metadata(file_path: Path) -> Optional[Dict[str, Any]]:
+    try:
+        stat_result = file_path.stat()
+    except OSError:
+        return None
+
+    cache_key = str(file_path.resolve())
+    with VIDEO_METADATA_LOCK:
+        cached = VIDEO_METADATA_CACHE.get(cache_key)
+        if cached and cached.get("mtime") == stat_result.st_mtime_ns:
+            return cached.get("data")
+
+    command = [
+        "ffprobe",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-select_streams",
+        "v:0",
+        "-show_entries",
+        "stream=avg_frame_rate,width,height,nb_frames:format=duration",
+        "-of",
+        "json",
+        str(file_path),
+    ]
+
+    try:
+        result = subprocess.run(
+            command,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except FileNotFoundError:
+        return None
+
+    metadata: Optional[Dict[str, Any]] = None
+    if result.returncode == 0 and result.stdout:
+        try:
+            payload = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            payload = {}
+        streams = payload.get("streams") or []
+        stream = next((entry for entry in streams if entry.get("codec_type") == "video"), None)
+        format_section = payload.get("format") or {}
+
+        fps = _parse_fraction(stream.get("avg_frame_rate")) if stream else None
+
+        width_value = stream.get("width") if stream else None
+        height_value = stream.get("height") if stream else None
+        nb_frames = stream.get("nb_frames") if stream else None
+
+        try:
+            width = int(width_value) if width_value is not None else None
+        except (TypeError, ValueError):
+            width = None
+
+        try:
+            height = int(height_value) if height_value is not None else None
+        except (TypeError, ValueError):
+            height = None
+
+        try:
+            frame_count = int(nb_frames) if nb_frames is not None else None
+        except (TypeError, ValueError):
+            frame_count = None
+
+        duration_value = format_section.get("duration")
+        duration: Optional[float] = None
+        if isinstance(duration_value, (int, float)):
+            duration = float(duration_value)
+        elif isinstance(duration_value, str):
+            try:
+                duration = float(duration_value)
+            except ValueError:
+                duration = None
+
+        if duration is None and frame_count and fps:
+            try:
+                duration = frame_count / fps
+            except ZeroDivisionError:
+                duration = None
+
+        collected: Dict[str, Any] = {}
+        if fps:
+            collected["fps"] = fps
+        if width and width > 0:
+            collected["width"] = width
+        if height and height > 0:
+            collected["height"] = height
+        if duration and duration > 0:
+            collected["duration"] = duration
+        if frame_count and frame_count > 0:
+            collected["frame_count"] = frame_count
+
+        if collected:
+            metadata = collected
+
+    with VIDEO_METADATA_LOCK:
+        VIDEO_METADATA_CACHE[cache_key] = {"mtime": stat_result.st_mtime_ns, "data": metadata}
+
+    return metadata
+
+
+def _is_protected_dataset_path(file_path: Path) -> bool:
+    return any(part.lower() in PROTECTED_DATASET_PARTS for part in file_path.parts)
+
+
+def _normalize_video_directory(dataset_path: Path, directory: str) -> Path:
+    candidate = Path(directory)
+    if not candidate.is_absolute():
+        candidate = (dataset_path.parent / candidate).resolve()
+    else:
+        candidate = candidate.resolve()
+    return candidate
+
+
+def _extract_video_directories_from_config(dataset_config: Path) -> Set[Path]:
+    try:
+        text = dataset_config.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise FileNotFoundError(f"Unable to read dataset config: {dataset_config}") from exc
+
+    try:
+        payload = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as exc:
+        raise ValueError(f"Dataset config is not valid TOML: {dataset_config}") from exc
+
+    directories: Set[Path] = set()
+    entries = payload.get("datasets")
+    if isinstance(entries, list):
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            video_dir = entry.get("video_directory")
+            if not video_dir:
+                continue
+            try:
+                normalized = _normalize_video_directory(dataset_config, str(video_dir))
+            except (OSError, ValueError):
+                continue
+            directories.add(normalized)
+    return directories
+
+
+def _codec_args_for_extension(extension: str) -> List[str]:
+    ext = extension.lower()
+    if ext in {".mp4", ".m4v", ".mov"}:
+        return ["-c:v", "libx264", "-preset", "faster", "-crf", "18", "-pix_fmt", "yuv420p", "-movflags", "+faststart"]
+    if ext == ".webm":
+        return ["-c:v", "libvpx-vp9", "-b:v", "0", "-crf", "32"]
+    if ext in {".mpg", ".mpeg"}:
+        return ["-c:v", "mpeg2video", "-qscale:v", "2"]
+    if ext in {".avi", ".mkv"}:
+        return ["-c:v", "libx264", "-preset", "faster", "-crf", "18", "-pix_fmt", "yuv420p"]
+    return ["-c:v", "libx264", "-preset", "faster", "-crf", "18", "-pix_fmt", "yuv420p"]
+
+
+def _convert_dataset_videos_to_16fps(dataset_config: Path) -> Dict[str, Any]:
+    if not dataset_config.exists() or not dataset_config.is_file():
+        raise FileNotFoundError(f"Dataset config not found: {dataset_config}")
+
+    directories = _extract_video_directories_from_config(dataset_config)
+    summary: Dict[str, Any] = {
+        "logs": [],
+        "errors": [],
+        "converted": 0,
+        "skipped": 0,
+        "total": 0,
+    }
+
+    if not directories:
+        summary["logs"].append("No video directories found in dataset config; skipping 16 FPS conversion.")
+        return summary
+
+    ffmpeg_path = shutil.which("ffmpeg")
+    if not ffmpeg_path:
+        raise RuntimeError("ffmpeg is required for 16 FPS conversion but was not found in PATH.")
+
+    version_info: Optional[str] = None
+    try:
+        version_result = subprocess.run(
+            [ffmpeg_path, "-version"],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except OSError as exc:
+        summary["logs"].append(
+            f"Using ffmpeg at '{ffmpeg_path}' (unable to determine version: {exc})."
+        )
+    else:
+        if version_result.returncode == 0 and version_result.stdout:
+            version_info = version_result.stdout.splitlines()[0].strip()
+        summary["logs"].append(
+            f"Using ffmpeg at '{ffmpeg_path}'"
+            + (f" — {version_info}" if version_info else ".")
+        )
+
+    processed: Set[Path] = set()
+    video_files: List[Path] = []
+    for directory in sorted(directories):
+        if not directory.exists() or not directory.is_dir():
+            summary["logs"].append(f"Video directory '{directory}' does not exist; skipping.")
+            continue
+        try:
+            for file_path in directory.rglob("*"):
+                if not file_path.is_file():
+                    continue
+                if file_path.suffix.lower() not in VIDEO_EXTENSIONS:
+                    continue
+                resolved = file_path.resolve()
+                if resolved in processed:
+                    continue
+                if _is_protected_dataset_path(resolved):
+                    continue
+                processed.add(resolved)
+                video_files.append(resolved)
+        except OSError:
+            summary["errors"].append(f"Failed to enumerate videos in '{directory}'.")
+
+    summary["total"] = len(video_files)
+    if not video_files:
+        summary["logs"].append("No video files found for conversion.")
+        return summary
+
+    summary["logs"].append(f"Preparing 16 FPS conversion for {len(video_files)} video file(s).")
+
+    for file_path in video_files:
+        original_meta = _probe_video_metadata(file_path)
+        original_fps = original_meta.get("fps") if isinstance(original_meta, dict) else None
+        if isinstance(original_fps, (int, float)) and abs(original_fps - VIDEO_TARGET_FPS) <= VIDEO_CONVERSION_TOLERANCE:
+            summary["skipped"] += 1
+            summary["logs"].append(
+                f"Skipping '{file_path.name}' — already {original_fps:.2f} FPS."
+            )
+            continue
+
+        tmp_path = file_path.with_suffix(file_path.suffix + ".tmp")
+        if tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+
+        command = [
+            ffmpeg_path,
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            str(file_path),
+            "-map",
+            "0:v:0",
+            "-vf",
+            "fps=16",
+            "-vsync",
+            "vfr",
+            "-an",
+            *(_codec_args_for_extension(file_path.suffix)),
+            str(tmp_path),
+        ]
+
+        try:
+            result = subprocess.run(
+                command,
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+        except OSError as exc:
+            summary["errors"].append(f"Failed to execute ffmpeg for '{file_path}': {exc}")
+            continue
+
+        if result.returncode != 0 or not tmp_path.exists():
+            summary["errors"].append(
+                f"Failed to convert '{file_path}': {result.stderr.strip() or result.stdout.strip() or 'ffmpeg error.'}"
+            )
+            try:
+                if tmp_path.exists():
+                    tmp_path.unlink()
+            except OSError:
+                pass
+            continue
+
+        try:
+            os.replace(tmp_path, file_path)
+        except OSError as exc:
+            summary["errors"].append(f"Failed to replace original video '{file_path}': {exc}")
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+            continue
+
+        _clear_video_metadata_cache_entry(file_path)
+        new_meta = _probe_video_metadata(file_path) or {}
+        new_fps = new_meta.get("fps")
+        if isinstance(new_fps, (int, float)):
+            summary["logs"].append(
+                f"Converted '{file_path.name}' to {new_fps:.2f} FPS"
+                + (f" (was {original_fps:.2f} FPS)." if isinstance(original_fps, (int, float)) else ".")
+            )
+        else:
+            summary["logs"].append(
+                f"Converted '{file_path.name}' to 16 FPS."
+            )
+        summary["converted"] += 1
+
+    summary["logs"].append(
+        f"16 FPS conversion complete — converted {summary['converted']} of {summary['total']} video(s); "
+        f"skipped {summary['skipped']}."
+    )
+
+    if summary["errors"]:
+        summary["errors"].append("Some videos could not be converted automatically. See ffmpeg errors above.")
+
+    return summary
 
 TOKEN_ENV_VAR = "JUPYTER_TOKEN"
 AUTH_COOKIE_NAME = "token"
@@ -287,6 +642,7 @@ class TrainRequest(BaseModel):
     upload_cloud: bool = True
     shutdown_instance: bool = True
     auto_confirm: bool = True
+    convert_videos_to_16fps: bool = False
 
 
 class ApiKeyRequest(BaseModel):
@@ -361,9 +717,11 @@ class TrainingState:
         self.stop_event = asyncio.Event()
         self.tasks = []
         self.stop_requested = False
+        self.process = None
+        self.running = False
+        self.status = "idle"
 
     def mark_started(self, process: asyncio.subprocess.Process) -> None:
-        self.reset_for_start()
         self.process = process
         self.status = "running"
         self.running = True
@@ -622,6 +980,9 @@ def _collect_dataset_items() -> List[Dict[str, Any]]:
         else:
             item["video_path"] = media_path
             item["video_url"] = media_url
+            metadata = _probe_video_metadata(file_path)
+            if metadata:
+                item["video_metadata"] = metadata
 
         items.append(item)
 
@@ -731,6 +1092,7 @@ def _collect_sillycaption_items(dataset_root: Path, route_prefix: str) -> List[D
         caption_info = captions.get((parent_key, stem_key), {})
         encoded = quote(relative.as_posix(), safe="/")
         media_type, _ = mimetypes.guess_type(str(file_path))
+        metadata = _probe_video_metadata(file_path) if suffix in VIDEO_EXTENSIONS else None
         items.append(
             {
                 "relative_path": relative.as_posix(),
@@ -739,6 +1101,7 @@ def _collect_sillycaption_items(dataset_root: Path, route_prefix: str) -> List[D
                 "caption_text": caption_info.get("caption_text"),
                 "caption_path": caption_info.get("caption_path"),
                 "media_type": media_type or "application/octet-stream",
+                "video_metadata": metadata if metadata else None,
             }
         )
 
@@ -1282,11 +1645,45 @@ async def start_training(payload: TrainRequest) -> Dict:
     if training_state.running:
         raise HTTPException(status_code=409, detail="Training already in progress")
 
+    training_state.reset_for_start()
+    training_state.status = "preparing"
+    await event_manager.publish({"type": "status", "status": "preparing", "running": False})
+
     for log_path in (HIGH_LOG, LOW_LOG):
         try:
             log_path.unlink()
         except FileNotFoundError:
             pass
+
+    if payload.convert_videos_to_16fps:
+        preparing_message = "Converting dataset videos to 16 FPS…"
+        training_state.append_log(preparing_message)
+        await event_manager.publish({"type": "log", "line": preparing_message})
+        dataset_config_path = Path(payload.dataset_path)
+        try:
+            conversion_summary = await asyncio.to_thread(_convert_dataset_videos_to_16fps, dataset_config_path)
+        except FileNotFoundError as exc:
+            message = str(exc)
+            training_state.append_log(message)
+            await event_manager.publish({"type": "log", "line": message})
+            raise HTTPException(status_code=400, detail=message) from exc
+        except ValueError as exc:
+            message = str(exc)
+            training_state.append_log(message)
+            await event_manager.publish({"type": "log", "line": message})
+            raise HTTPException(status_code=400, detail=message) from exc
+        except RuntimeError as exc:
+            message = str(exc)
+            training_state.append_log(message)
+            await event_manager.publish({"type": "log", "line": message})
+            raise HTTPException(status_code=500, detail=message) from exc
+        else:
+            for line in conversion_summary.get("logs", []):
+                training_state.append_log(line)
+                await event_manager.publish({"type": "log", "line": line})
+            for line in conversion_summary.get("errors", []):
+                training_state.append_log(line)
+                await event_manager.publish({"type": "log", "line": line})
 
     cloud_status = await gather_cloud_status()
     if payload.upload_cloud and not cloud_status.get("can_upload", False):

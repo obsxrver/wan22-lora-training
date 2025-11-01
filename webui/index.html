@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>WAN 2.2 LoRA Training</title>
+    <script src="/SillyCaption/static/video-metadata-utils.js" defer></script>
     <style>
       :root {
         color-scheme: dark;
@@ -303,6 +304,102 @@
         font-style: italic;
       }
 
+      .video-meta {
+        display: grid;
+        gap: 0.25rem;
+        font-size: 0.78rem;
+        color: var(--muted);
+      }
+
+      .video-meta-row {
+        display: inline-flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.4rem;
+      }
+
+      .video-meta-label {
+        font-weight: 600;
+        color: var(--muted);
+      }
+
+      .video-meta-value {
+        color: var(--text);
+      }
+
+      .video-warning {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 1.35rem;
+        height: 1.35rem;
+        border-radius: 999px;
+        background: rgba(250, 204, 21, 0.16);
+        color: #facc15;
+        cursor: pointer;
+        flex-shrink: 0;
+        transition: transform 0.15s ease;
+      }
+
+      .video-warning svg {
+        width: 0.9rem;
+        height: 0.9rem;
+      }
+
+      .video-warning--fps {
+        background: rgba(239, 68, 68, 0.18);
+        color: #f87171;
+      }
+
+      .video-warning:hover {
+        transform: translateY(-1px);
+      }
+
+      .video-warning-tooltip {
+        position: absolute;
+        bottom: calc(100% + 0.55rem);
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(18, 18, 18, 0.95);
+        color: var(--text);
+        padding: 0.5rem 0.65rem;
+        border-radius: 10px;
+        box-shadow: 0 12px 24px rgba(0, 0, 0, 0.45);
+        font-size: 0.7rem;
+        line-height: 1.35;
+        width: max-content;
+        max-width: 240px;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.15s ease;
+        z-index: 30;
+        text-align: left;
+      }
+
+      .video-warning-tooltip::after {
+        content: '';
+        position: absolute;
+        top: 100%;
+        left: 50%;
+        transform: translateX(-50%);
+        border-width: 6px;
+        border-style: solid;
+        border-color: rgba(18, 18, 18, 0.95) transparent transparent transparent;
+      }
+
+      .video-warning-tooltip-note {
+        display: block;
+        margin-top: 0.35rem;
+        color: var(--muted);
+        font-size: 0.65rem;
+      }
+
+      .video-warning.tooltip-visible .video-warning-tooltip {
+        opacity: 1;
+        pointer-events: auto;
+      }
+
       form {
         display: grid;
         gap: 1rem;
@@ -506,7 +603,7 @@
         <input id="fileInput" type="file" multiple />
         <div id="upload-summary">Files will be saved to /workspace/musubi-tuner/dataset/.</div>
         <div id="dataset-preview-section">
-          <details class="dataset-preview-collapsible" open>
+          <details class="dataset-preview-collapsible">
             <summary>
               <h3>Current dataset</h3>
             </summary>
@@ -563,6 +660,10 @@
             <label class="toggle">
               <input type="checkbox" name="shutdownInstance" checked />
               Shut down instance after training
+            </label>
+            <label class="toggle">
+              <input type="checkbox" name="convertTo16Fps" />
+              Convert all dataset videos to 16 FPS before training
             </label>
           </div>
           <div id="cloudStatusMessage" class="status-note" aria-live="polite"></div>
@@ -657,6 +758,147 @@
       const MAX_LOG_LINES = 400;
       const logLines = [];
       const VIDEO_EXTENSION_PATTERN = /\.(mp4|mov|avi|mkv|webm|mpg|mpeg)$/i;
+      const isCoarsePointer = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+      const videoMetadataUtils = window.VideoMetadataUtils || {};
+      let {
+        formatNumber,
+        formatDuration,
+        createTooltipController,
+        normalizeVideoMetadata,
+      } = videoMetadataUtils;
+
+      if (typeof formatNumber !== 'function') {
+        formatNumber = (value, digits = 2) => {
+          if (!Number.isFinite(value)) {
+            return 'Unknown';
+          }
+          return Number(value)
+            .toFixed(digits)
+            .replace(/\.0+$/, '')
+            .replace(/(\.\d*?)0+$/, '$1')
+            .replace(/\.$/, '');
+        };
+      }
+
+      if (typeof formatDuration !== 'function') {
+        formatDuration = (seconds) => {
+          if (!Number.isFinite(seconds) || seconds < 0) {
+            return 'Unknown';
+          }
+          if (seconds >= 3600) {
+            const hours = Math.floor(seconds / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            const secs = Math.round(seconds % 60);
+            return `${hours}h ${minutes}m ${secs}s`;
+          }
+          if (seconds >= 60) {
+            const minutes = Math.floor(seconds / 60);
+            const secs = seconds % 60;
+            const secsText = secs >= 10 ? Math.round(secs).toString() : secs.toFixed(1);
+            return `${minutes}m ${secsText.replace(/\.0$/, '')}s`;
+          }
+          return seconds < 10 ? `${seconds.toFixed(2)} s` : `${seconds.toFixed(1)} s`;
+        };
+      }
+
+      if (typeof createTooltipController !== 'function') {
+        createTooltipController = ({ document: doc }) => ({
+          createWarningIcon(type, tooltipText) {
+            const fallback = doc.createElement('span');
+            fallback.className = `video-warning video-warning--${type}`;
+            fallback.textContent = tooltipText;
+            return fallback;
+          },
+          destroy() {},
+          getActiveTrigger() {
+            return null;
+          },
+          clearActiveTrigger() {},
+        });
+      }
+
+      if (typeof normalizeVideoMetadata !== 'function') {
+        normalizeVideoMetadata = (metadata) =>
+          metadata && typeof metadata === 'object' ? metadata : null;
+      }
+
+      const tooltipController = createTooltipController({
+        document,
+        isCoarsePointer,
+        iconSize: 14,
+      });
+      const { createWarningIcon } = tooltipController;
+
+      function extractVideoMetadata(raw) {
+        return typeof normalizeVideoMetadata === 'function'
+          ? normalizeVideoMetadata(raw)
+          : raw;
+      }
+
+      function createVideoMetadataElement(rawMetadata) {
+        const metadata = extractVideoMetadata(rawMetadata) || {};
+        const container = document.createElement('div');
+        container.className = 'video-meta';
+
+        const resolutionRow = document.createElement('div');
+        resolutionRow.className = 'video-meta-row';
+        const durationRow = document.createElement('div');
+        durationRow.className = 'video-meta-row';
+        const fpsRow = document.createElement('div');
+        fpsRow.className = 'video-meta-row';
+
+        function appendRow(rowElement, label, value) {
+          const labelSpan = document.createElement('span');
+          labelSpan.className = 'video-meta-label';
+          labelSpan.textContent = `${label}:`;
+          const valueSpan = document.createElement('span');
+          valueSpan.className = 'video-meta-value';
+          valueSpan.textContent = value;
+          rowElement.innerHTML = '';
+          rowElement.append(labelSpan, valueSpan);
+          container.appendChild(rowElement);
+          return valueSpan;
+        }
+
+        const width = Number(metadata.width);
+        const height = Number(metadata.height);
+        const duration = Number(metadata.duration);
+        const fps = Number(metadata.fps);
+
+        const hasResolution = Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0;
+        appendRow(
+          resolutionRow,
+          'Resolution',
+          hasResolution ? `${Math.round(width)}×${Math.round(height)}` : 'Unknown'
+        );
+
+        appendRow(
+          durationRow,
+          'Duration',
+          Number.isFinite(duration) && duration > 0 ? formatDuration(duration) : 'Unknown'
+        );
+        if (Number.isFinite(duration) && duration > 5) {
+          durationRow.appendChild(
+            createWarningIcon('duration', 'Only the first 5 seconds of the video will be used.')
+          );
+        }
+
+        appendRow(
+          fpsRow,
+          'FPS',
+          Number.isFinite(fps) && fps > 0 ? formatNumber(fps, 2) : 'Unknown'
+        );
+        if (Number.isFinite(fps) && Math.abs(fps - 16) > 1) {
+          fpsRow.appendChild(
+            createWarningIcon(
+              'fps',
+              'WAN 2.2 was trained on 16 FPS. Videos over or under 16 FPS will cause slow-motion / sped up issues in the result.'
+            )
+          );
+        }
+
+        return container;
+      }
 
       function setDatasetMessage(text = '', isError = false) {
         if (!datasetMessage) {
@@ -798,6 +1040,13 @@
           captionMeta.className = 'dataset-card-meta';
           captionMeta.textContent = `Caption: ${item.caption_path}`;
           body.appendChild(captionMeta);
+        }
+
+        if (isVideo) {
+          const metadataElement = createVideoMetadataElement(item?.video_metadata ?? null);
+          if (metadataElement) {
+            body.appendChild(metadataElement);
+          }
         }
 
         const caption = document.createElement('p');
@@ -1285,6 +1534,7 @@
           max_data_loader_workers: formData.get('maxWorkers') ? Number(formData.get('maxWorkers')) : null,
           upload_cloud: formData.get('uploadCloud') === 'on',
           shutdown_instance: formData.get('shutdownInstance') === 'on',
+          convert_videos_to_16fps: formData.get('convertTo16Fps') === 'on',
           auto_confirm: true,
         };
 
