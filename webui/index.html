@@ -303,6 +303,103 @@
         font-style: italic;
       }
 
+      .dataset-card-video-meta {
+        margin-top: 0.5rem;
+      }
+
+      .video-meta {
+        display: inline-flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.4rem;
+        font-size: 0.85rem;
+        color: var(--text);
+      }
+
+      .video-meta-error {
+        color: #ffb74d;
+      }
+
+      .video-meta-text {
+        display: inline-flex;
+        gap: 0.35rem;
+        align-items: center;
+      }
+
+      .video-warning {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 1.1rem;
+        height: 1.1rem;
+        border-radius: 999px;
+        cursor: pointer;
+        outline: none;
+      }
+
+      .video-warning svg {
+        width: 100%;
+        height: 100%;
+      }
+
+      .video-warning:focus-visible {
+        box-shadow: 0 0 0 3px rgba(138, 180, 248, 0.35);
+      }
+
+      .video-warning-tooltip {
+        position: absolute;
+        bottom: calc(100% + 8px);
+        left: 50%;
+        transform: translate(-50%, 0);
+        background: rgba(32, 32, 32, 0.95);
+        border: 1px solid var(--border);
+        color: var(--text);
+        padding: 0.45rem 0.65rem;
+        border-radius: 10px;
+        font-size: 0.75rem;
+        white-space: nowrap;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.2s ease, transform 0.2s ease;
+        z-index: 10;
+      }
+
+      .video-warning.tooltip-visible .video-warning-tooltip,
+      .video-warning:hover .video-warning-tooltip,
+      .video-warning:focus-within .video-warning-tooltip {
+        opacity: 1;
+        transform: translate(-50%, -6px);
+        pointer-events: auto;
+      }
+
+      .video-warning-tooltip-hint {
+        display: block;
+        margin-top: 0.25rem;
+        font-size: 0.7rem;
+        color: var(--muted);
+      }
+
+      .video-warning--duration {
+        color: #f2c744;
+      }
+
+      .video-warning--fps {
+        color: #ef5350;
+      }
+
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
+
       form {
         display: grid;
         gap: 1rem;
@@ -506,7 +603,7 @@
         <input id="fileInput" type="file" multiple />
         <div id="upload-summary">Files will be saved to /workspace/musubi-tuner/dataset/.</div>
         <div id="dataset-preview-section">
-          <details class="dataset-preview-collapsible" open>
+          <details class="dataset-preview-collapsible">
             <summary>
               <h3>Current dataset</h3>
             </summary>
@@ -563,6 +660,12 @@
             <label class="toggle">
               <input type="checkbox" name="shutdownInstance" checked />
               Shut down instance after training
+            </label>
+          </div>
+          <div class="form-row two-col">
+            <label class="toggle">
+              <input type="checkbox" name="convert16fps" />
+              Auto-convert dataset videos to 16 FPS before training
             </label>
           </div>
           <div id="cloudStatusMessage" class="status-note" aria-live="polite"></div>
@@ -652,11 +755,30 @@
       const apiKeyInput = document.getElementById('vastApiKeyInput');
       const apiKeyButton = document.getElementById('saveApiKeyButton');
       const apiKeyMessageEl = document.getElementById('apiKeyMessage');
+      const pointerMediaQuery = window.matchMedia ? window.matchMedia('(pointer: coarse)') : null;
+      let isCoarsePointer = pointerMediaQuery ? pointerMediaQuery.matches : false;
+      if (pointerMediaQuery && typeof pointerMediaQuery.addEventListener === 'function') {
+        pointerMediaQuery.addEventListener('change', (event) => {
+          isCoarsePointer = event.matches;
+        });
+      }
       let currentCloudStatus = null;
 
       const MAX_LOG_LINES = 400;
       const logLines = [];
       const VIDEO_EXTENSION_PATTERN = /\.(mp4|mov|avi|mkv|webm|mpg|mpeg)$/i;
+      const metadataCache = new Map();
+      const activeTooltipIcons = new Set();
+
+      document.addEventListener('click', (event) => {
+        const icons = Array.from(activeTooltipIcons);
+        icons.forEach((icon) => {
+          if (!icon.contains(event.target)) {
+            icon.classList.remove('tooltip-visible');
+            activeTooltipIcons.delete(icon);
+          }
+        });
+      });
 
       function setDatasetMessage(text = '', isError = false) {
         if (!datasetMessage) {
@@ -793,6 +915,14 @@
         title.textContent = mediaPath || 'Unknown file';
         body.appendChild(title);
 
+        if (isVideo) {
+          const metadataEl = document.createElement('div');
+          metadataEl.className = 'dataset-card-video-meta video-meta';
+          metadataEl.textContent = 'Loading video metadata…';
+          body.appendChild(metadataEl);
+          loadDatasetVideoMetadata(mediaPath, metadataEl);
+        }
+
         if (item?.caption_path) {
           const captionMeta = document.createElement('p');
           captionMeta.className = 'dataset-card-meta';
@@ -861,6 +991,175 @@
           setDatasetMessage(error?.message || 'Failed to load dataset preview.', true);
         } finally {
           datasetGrid.removeAttribute('aria-busy');
+        }
+      }
+
+      function formatVideoMetadata(metadata) {
+        if (!metadata || typeof metadata !== 'object') {
+          return '';
+        }
+        const parts = [];
+        if (metadata.fps != null) {
+          const fpsValue = Number(metadata.fps);
+          if (Number.isFinite(fpsValue)) {
+            parts.push(`${fpsValue.toFixed(2)} fps`);
+          }
+        }
+        if (metadata.width != null && metadata.height != null) {
+          const widthValue = Number(metadata.width);
+          const heightValue = Number(metadata.height);
+          if (Number.isFinite(widthValue) && Number.isFinite(heightValue)) {
+            parts.push(`${Math.round(widthValue)}×${Math.round(heightValue)}`);
+          }
+        }
+        if (metadata.duration != null) {
+          const durationValue = Number(metadata.duration);
+          if (Number.isFinite(durationValue)) {
+            parts.push(`${durationValue.toFixed(2)} s`);
+          }
+        }
+        return parts.join(' • ');
+      }
+
+      function createWarningIcon(type, tooltip) {
+        const icon = document.createElement('span');
+        icon.className = `video-warning video-warning--${type}`;
+        icon.setAttribute('role', 'button');
+        icon.setAttribute('tabindex', '0');
+        icon.setAttribute('aria-label', tooltip);
+
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('viewBox', '0 0 24 24');
+        svg.setAttribute('aria-hidden', 'true');
+        svg.setAttribute('fill', 'currentColor');
+
+        if (type === 'duration') {
+          svg.innerHTML = '<path d="M12 22a10 10 0 1 1 10-10 10.011 10.011 0 0 1-10 10Zm0-18a8 8 0 1 0 8 8 8.009 8.009 0 0 0-8-8Zm.5 4a1 1 0 0 0-1 1v4.25a1 1 0 0 0 .553.894l3 1.5a1 1 0 0 0 .894-1.788L13.5 12.76V9a1 1 0 0 0-1-1Z" />';
+        } else {
+          svg.innerHTML = '<path d="M12 2a10 10 0 0 0-9.33 13.648 1.25 1.25 0 0 0 1.147.779h16.366a1.25 1.25 0 0 0 1.147-.779A10 10 0 0 0 12 2Zm6.713 12.177H5.287A7.5 7.5 0 0 1 19.4 9.8a7.577 7.577 0 0 1-.687 4.377ZM11 6.75h2v4.5h-2Zm0 6h2v2h-2Z" />';
+        }
+
+        const tooltipEl = document.createElement('span');
+        tooltipEl.className = 'video-warning-tooltip';
+        tooltipEl.textContent = tooltip;
+        if (isCoarsePointer) {
+          const hint = document.createElement('span');
+          hint.className = 'video-warning-tooltip-hint';
+          hint.textContent = 'Tap again to dismiss';
+          tooltipEl.appendChild(document.createElement('br'));
+          tooltipEl.appendChild(hint);
+        }
+
+        icon.appendChild(svg);
+        icon.appendChild(tooltipEl);
+
+        icon.addEventListener('click', (event) => {
+          if (!isCoarsePointer) {
+            return;
+          }
+          event.preventDefault();
+          const willShow = !icon.classList.contains('tooltip-visible');
+          const icons = Array.from(activeTooltipIcons);
+          icons.forEach((other) => {
+            if (other !== icon) {
+              other.classList.remove('tooltip-visible');
+              activeTooltipIcons.delete(other);
+            }
+          });
+          if (willShow) {
+            icon.classList.add('tooltip-visible');
+            activeTooltipIcons.add(icon);
+          } else {
+            icon.classList.remove('tooltip-visible');
+            activeTooltipIcons.delete(icon);
+          }
+        });
+
+        icon.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            const willShow = !icon.classList.contains('tooltip-visible');
+            if (willShow) {
+              icon.classList.add('tooltip-visible');
+              activeTooltipIcons.add(icon);
+            } else {
+              icon.classList.remove('tooltip-visible');
+              activeTooltipIcons.delete(icon);
+            }
+          }
+        });
+
+        icon.addEventListener('blur', () => {
+          icon.classList.remove('tooltip-visible');
+          activeTooltipIcons.delete(icon);
+        });
+
+        return icon;
+      }
+
+      function applyVideoMetadata(container, metadata) {
+        if (!container) {
+          return;
+        }
+        container.classList.remove('video-meta-error');
+        container.textContent = '';
+        const text = formatVideoMetadata(metadata);
+        const textSpan = document.createElement('span');
+        textSpan.className = 'video-meta-text';
+        textSpan.textContent = text || 'Video metadata unavailable';
+        container.appendChild(textSpan);
+
+        const durationValue = Number(metadata?.duration);
+        if (Number.isFinite(durationValue) && durationValue > 5) {
+          const warning = createWarningIcon(
+            'duration',
+            'Only the first 5 seconds of this video will be used during training.'
+          );
+          container.appendChild(warning);
+        }
+
+        const fpsValue = Number(metadata?.fps);
+        if (Number.isFinite(fpsValue) && Math.abs(fpsValue - 16) > 1) {
+          const warning = createWarningIcon(
+            'fps',
+            'WAN 2.2 was trained on 16 FPS. Videos over or under 16 FPS will cause slow-motion or sped-up issues in the result.'
+          );
+          container.appendChild(warning);
+        }
+      }
+
+      async function fetchVideoMetadata(request) {
+        if (!request || !request.path) {
+          return null;
+        }
+        const keyParts = [request.scope || 'dataset', request.dataset_name || '', request.path];
+        const cacheKey = keyParts.join('|');
+        if (metadataCache.has(cacheKey)) {
+          return metadataCache.get(cacheKey);
+        }
+        const response = await fetch('/get-metadata', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(request),
+        });
+        if (!response.ok) {
+          throw new Error('Failed to read metadata');
+        }
+        const data = await response.json();
+        metadataCache.set(cacheKey, data);
+        return data;
+      }
+
+      async function loadDatasetVideoMetadata(mediaPath, container) {
+        if (!container) {
+          return;
+        }
+        try {
+          const metadata = await fetchVideoMetadata({ scope: 'dataset', path: mediaPath });
+          applyVideoMetadata(container, metadata);
+        } catch (error) {
+          container.textContent = 'Unable to load video metadata';
+          container.classList.add('video-meta-error');
         }
       }
 
@@ -1285,6 +1584,7 @@
           max_data_loader_workers: formData.get('maxWorkers') ? Number(formData.get('maxWorkers')) : null,
           upload_cloud: formData.get('uploadCloud') === 'on',
           shutdown_instance: formData.get('shutdownInstance') === 'on',
+          convert_to_16fps: formData.get('convert16fps') === 'on',
           auto_confirm: true,
         };
 

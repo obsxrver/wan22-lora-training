@@ -8,10 +8,11 @@ import shutil
 import subprocess
 import tempfile
 from collections import deque
+from fractions import Fraction
 from pathlib import Path
 from typing import Any, Dict, FrozenSet, List, Optional, Set
 
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import Body, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ValidationError
@@ -286,6 +287,7 @@ class TrainRequest(BaseModel):
     max_data_loader_workers: Optional[int] = Field(default=None, ge=1)
     upload_cloud: bool = True
     shutdown_instance: bool = True
+    convert_to_16fps: bool = False
     auto_confirm: bool = True
 
 
@@ -309,6 +311,12 @@ class ExportPayload(BaseModel):
 
 class DeleteDatasetItem(BaseModel):
     media_path: str = Field(min_length=1)
+
+
+class VideoMetadataRequest(BaseModel):
+    scope: Literal["dataset", "library"] = "dataset"
+    path: str = Field(min_length=1)
+    dataset_name: Optional[str] = None
 
 
 class EventManager:
@@ -627,6 +635,128 @@ def _collect_dataset_items() -> List[Dict[str, Any]]:
 
     items.sort(key=lambda item: item["media_path"].lower())
     return items
+
+
+def _parse_frame_rate(value: Optional[str]) -> Optional[float]:
+    if not value:
+        return None
+    try:
+        fraction = Fraction(value)
+    except (ValueError, ZeroDivisionError):
+        return None
+    if fraction.denominator == 0:
+        return None
+    return float(fraction)
+
+
+def _probe_video_metadata(file_path: Path, *, validate_suffix: bool = True) -> Dict[str, Any]:
+    if validate_suffix and file_path.suffix.lower() not in VIDEO_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="File is not a supported video format")
+    if shutil.which("ffprobe") is None:
+        raise HTTPException(status_code=503, detail="ffprobe is not available on this system")
+
+    command = [
+        "ffprobe",
+        "-v",
+        "error",
+        "-select_streams",
+        "v:0",
+        "-show_entries",
+        "stream=avg_frame_rate,width,height,duration",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "json",
+        str(file_path),
+    ]
+    process = subprocess.run(
+        command,
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    if process.returncode != 0:
+        detail = process.stderr.strip() or "Unable to read metadata from video"
+        raise HTTPException(status_code=500, detail=detail)
+
+    try:
+        info = json.loads(process.stdout or "{}")
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=500, detail="Failed to parse metadata output") from exc
+
+    streams = info.get("streams") or []
+    stream = streams[0] if streams else {}
+    format_info = info.get("format") or {}
+
+    fps_value = _parse_frame_rate(stream.get("avg_frame_rate") or stream.get("r_frame_rate"))
+    duration_candidate = format_info.get("duration") or stream.get("duration")
+    duration_value: Optional[float] = None
+    if duration_candidate is not None:
+        try:
+            duration_value = round(float(duration_candidate), 3)
+        except (TypeError, ValueError):
+            duration_value = None
+
+    width_value: Optional[int]
+    height_value: Optional[int]
+    try:
+        width_value = int(stream.get("width"))
+    except (TypeError, ValueError):
+        width_value = None
+    try:
+        height_value = int(stream.get("height"))
+    except (TypeError, ValueError):
+        height_value = None
+
+    return {
+        "title": file_path.name,
+        "duration": duration_value,
+        "fps": round(fps_value, 4) if fps_value is not None else None,
+        "width": width_value,
+        "height": height_value,
+    }
+
+
+def _resolve_video_metadata_file(payload: VideoMetadataRequest) -> Path:
+    if payload.scope == "dataset":
+        return _resolve_dataset_file(payload.path)
+    if payload.scope == "library":
+        if not payload.dataset_name:
+            raise HTTPException(status_code=400, detail="dataset_name is required for library scope")
+        return _resolve_library_file(payload.dataset_name, payload.path)
+    raise HTTPException(status_code=400, detail="Unsupported metadata scope")
+
+
+async def _probe_upload_metadata(upload: UploadFile) -> Dict[str, Any]:
+    filename = upload.filename or "uploaded_video"
+    suffix = Path(filename).suffix or ".mp4"
+    temp_path: Optional[Path] = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            while True:
+                chunk = await upload.read(1024 * 1024)
+                if not chunk:
+                    break
+                tmp.write(chunk)
+        temp_path = Path(tmp.name)
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to store temporary file: {exc}") from exc
+    finally:
+        await upload.close()
+
+    try:
+        if temp_path is None:
+            raise HTTPException(status_code=500, detail="Temporary file was not created")
+        metadata = _probe_video_metadata(temp_path, validate_suffix=False)
+        metadata["title"] = filename
+        return metadata
+    finally:
+        try:
+            if temp_path is not None:
+                temp_path.unlink()
+        except OSError:
+            pass
 
 
 def _normalize_export_path(value: str) -> Path:
@@ -1024,6 +1154,27 @@ async def dataset_delete(payload: DeleteDatasetItem) -> Dict[str, Any]:
     return result
 
 
+@app.post("/get-metadata")
+async def video_metadata(
+    payload: Optional[VideoMetadataRequest] = Body(None),
+    upload: Optional[UploadFile] = File(None),
+    scope: Optional[str] = Form(None),
+    path: Optional[str] = Form(None),
+    dataset_name: Optional[str] = Form(None),
+) -> Dict[str, Any]:
+    if upload is not None:
+        return await _probe_upload_metadata(upload)
+
+    if payload is None:
+        if path:
+            payload = VideoMetadataRequest(scope=scope or "dataset", path=path, dataset_name=dataset_name)
+        else:
+            raise HTTPException(status_code=400, detail="No metadata payload provided")
+
+    file_path = _resolve_video_metadata_file(payload)
+    return _probe_video_metadata(file_path)
+
+
 def _iter_file_chunks(file_path: Path, start: int = 0, end: Optional[int] = None, chunk_size: int = 1024 * 1024):
     with file_path.open("rb") as stream:
         stream.seek(start)
@@ -1272,6 +1423,8 @@ def build_command(payload: TrainRequest) -> List[str]:
     args.extend(["--shutdown-instance", "Y" if payload.shutdown_instance else "N"])
     if payload.auto_confirm:
         args.append("--auto-confirm")
+    if payload.convert_to_16fps:
+        args.append("--convert-to-16fps")
     return args
 
 

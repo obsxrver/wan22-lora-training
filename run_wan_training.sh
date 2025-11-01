@@ -27,6 +27,8 @@ MAX_WORKERS_INPUT="${WAN_MAX_DATA_LOADER_WORKERS:-}"
 CLI_UPLOAD_CLOUD="${WAN_UPLOAD_CLOUD:-}"
 CLI_SHUTDOWN_INSTANCE="${WAN_SHUTDOWN_INSTANCE:-}"
 AUTO_CONFIRM=0
+CONVERT_TO_16FPS=0
+LAST_CONVERSION_RESULT=""
 
 CLOUD_PERMISSION_DENIED=0
 CLOUD_CONNECTION_MESSAGE=""
@@ -45,6 +47,7 @@ Optional arguments (all fall back to interactive prompts when omitted):
   --max-data-loader-workers N      Data loader workers
   --upload-cloud [Y|N]             Upload outputs to configured cloud storage
   --shutdown-instance [Y|N]        Shut down Vast.ai instance after training
+  --convert-to-16fps               Convert all dataset videos to 16 FPS before training
   --auto-confirm                   Skip the final confirmation prompt
   --help                           Show this message and exit
 
@@ -67,6 +70,164 @@ normalize_yes_no() {
     [Nn]|[Nn][Oo]) echo "N" ;;
     *) echo "$value" ;;
   esac
+}
+
+convert_video_to_16fps() {
+  local input="$1"
+  LAST_CONVERSION_RESULT="failed"
+  if [[ -z "$input" || ! -f "$input" ]]; then
+    echo "Skipping 16 FPS conversion for missing file: $input" >&2
+    return 1
+  fi
+
+  if ! command -v ffprobe >/dev/null 2>&1 || ! command -v ffmpeg >/dev/null 2>&1; then
+    echo "ffprobe/ffmpeg not available; cannot convert $input" >&2
+    return 1
+  fi
+
+  local rate
+  rate=$(ffprobe -v error -select_streams v:0 -show_entries stream=avg_frame_rate -of default=noprint_wrappers=1:nokey=1 "$input" 2>/dev/null || true)
+  local decision_output
+  decision_output=$(python3 - "$rate" <<'PY'
+import sys
+from fractions import Fraction
+
+rate = sys.argv[1] if len(sys.argv) > 1 else ""
+fps_value = None
+if rate:
+    try:
+        fps_value = float(Fraction(rate))
+    except (ValueError, ZeroDivisionError):
+        fps_value = None
+
+decision = "convert"
+if fps_value is not None and abs(fps_value - 16.0) <= 0.1:
+    decision = "skip"
+
+if fps_value is None:
+    print(f"{decision}|")
+else:
+    print(f"{decision}|{fps_value:.4f}")
+PY
+)
+
+  local decision="${decision_output%%|*}"
+  local current_fps="${decision_output#*|}"
+
+  if [[ "$decision" == "skip" ]]; then
+    LAST_CONVERSION_RESULT="skip"
+    return 0
+  fi
+
+  local base="${input##*/}"
+  local dir="${input%/*}"
+  [[ "$dir" == "$input" ]] && dir="."
+  local stem="${base%.*}"
+  local extension=""
+  if [[ "$base" == *.* ]]; then
+    extension=".${base##*.}"
+  else
+    extension=".mp4"
+  fi
+
+  local tmp_file
+  if ! TMPDIR="$dir" tmp_file=$(mktemp ".${stem}.XXXXXX${extension}"); then
+    echo "Failed to create temporary file for $input" >&2
+    return 1
+  fi
+  tmp_file="$dir/${tmp_file}"  # mktemp prints relative path
+
+  local ext_lower="${extension,,}"
+  ext_lower="${ext_lower#.}"
+  local -a video_codec_args
+  local -a audio_codec_args
+
+  case "$ext_lower" in
+    mp4|m4v|mov)
+      video_codec_args=(-c:v libx264 -preset slow -crf 12 -pix_fmt yuv420p -movflags +faststart)
+      audio_codec_args=(-c:a copy)
+      ;;
+    mkv)
+      video_codec_args=(-c:v libx264 -preset slow -crf 12 -pix_fmt yuv420p)
+      audio_codec_args=(-c:a copy)
+      ;;
+    webm)
+      video_codec_args=(-c:v libvpx-vp9 -b:v 0 -crf 32 -pix_fmt yuv420p)
+      audio_codec_args=(-c:a libopus -b:a 160k)
+      ;;
+    avi|mpg|mpeg)
+      video_codec_args=(-c:v libx264 -preset slow -crf 12 -pix_fmt yuv420p)
+      audio_codec_args=(-c:a aac -b:a 192k)
+      ;;
+    *)
+      video_codec_args=(-c:v libx264 -preset slow -crf 12 -pix_fmt yuv420p)
+      audio_codec_args=(-c:a copy)
+      ;;
+  esac
+
+  echo "Converting to 16 FPS: $input${current_fps:+ (detected ${current_fps} fps)}"
+
+  local -a cmd
+  cmd=(ffmpeg -hide_banner -loglevel error -y -i "$input" -vf "fps=16" -r 16)
+  if ((${#video_codec_args[@]})); then
+    cmd+=(${video_codec_args[@]})
+  fi
+  if ((${#audio_codec_args[@]})); then
+    cmd+=(${audio_codec_args[@]})
+  fi
+  cmd+=("$tmp_file")
+
+  if ! "${cmd[@]}"; then
+    echo "ffmpeg conversion failed for $input" >&2
+    rm -f "$tmp_file"
+    return 1
+  fi
+
+  touch -r "$input" "$tmp_file" 2>/dev/null || true
+  if mv -f "$tmp_file" "$input"; then
+    echo "Converted $input to 16 FPS."
+    LAST_CONVERSION_RESULT="converted"
+    return 0
+  else
+    echo "Failed to replace original file for $input" >&2
+    rm -f "$tmp_file"
+    return 1
+  fi
+}
+
+convert_dataset_videos_to_16fps() {
+  local dataset_dir="$1"
+  if [[ ! -d "$dataset_dir" ]]; then
+    echo "Dataset directory $dataset_dir not found; skipping 16 FPS conversion." >&2
+    return 1
+  fi
+  if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v ffprobe >/dev/null 2>&1; then
+    echo "ffmpeg/ffprobe not available; skipping 16 FPS conversion." >&2
+    return 1
+  fi
+
+  local converted=0
+  local failures=0
+
+  while IFS= read -r -d '' video_path; do
+    if convert_video_to_16fps "$video_path"; then
+      if [[ "${LAST_CONVERSION_RESULT:-}" == "converted" ]]; then
+        ((converted++))
+      fi
+    else
+      ((failures++))
+    fi
+  done < <(find "$dataset_dir" -type f \
+    \( -iname '*.mp4' -o -iname '*.mov' -o -iname '*.avi' -o -iname '*.mkv' -o -iname '*.webm' -o -iname '*.mpg' -o -iname '*.mpeg' \) -print0)
+
+  if (( converted == 0 && failures == 0 )); then
+    echo "No video files required 16 FPS conversion."
+  else
+    echo "16 FPS conversion complete. Updated $converted file(s)."
+    if (( failures > 0 )); then
+      echo "Failed to convert $failures file(s)." >&2
+    fi
+  fi
 }
 
 while [[ $# -gt 0 ]]; do
@@ -102,6 +263,10 @@ while [[ $# -gt 0 ]]; do
     --shutdown-instance)
       CLI_SHUTDOWN_INSTANCE="$2"
       shift 2
+      ;;
+    --convert-to-16fps)
+      CONVERT_TO_16FPS=1
+      shift 1
       ;;
     --auto-confirm)
       AUTO_CONFIRM=1
@@ -701,6 +866,7 @@ main() {
   echo "  Save every: $SAVE_EVERY epochs"
   echo "  Upload to cloud: $UPLOAD_CLOUD"
   echo "  Auto-shutdown: $SHUTDOWN_INSTANCE"
+  echo "  Convert to 16 FPS: $([[ $CONVERT_TO_16FPS -eq 1 ]] && echo Y || echo N)"
   echo ""
   if (( AUTO_CONFIRM )); then
     PROCEED="Y"
@@ -733,6 +899,11 @@ main() {
   echo "Using CPU parameters:"
   echo "  --num_cpu_threads_per_process: $CPU_THREADS_PER_PROCESS"
   echo "  --max_data_loader_n_workers: $MAX_DATA_LOADER_WORKERS"
+
+  if (( CONVERT_TO_16FPS )); then
+    echo "Ensuring dataset videos are 16 FPS..."
+    convert_dataset_videos_to_16fps "$MUSUBI_DIR/dataset"
+  fi
 
   echo "Caching latents..."
   "$PYTHON" src/musubi_tuner/wan_cache_latents.py \

@@ -89,6 +89,272 @@
   };
 
   let uploadCounter = 0;
+  const metadataCache = new Map();
+  const activeTooltipIcons = new Set();
+  const pointerMediaQuery = window.matchMedia ? window.matchMedia('(pointer: coarse)') : null;
+  let isCoarsePointer = pointerMediaQuery ? pointerMediaQuery.matches : false;
+  if (pointerMediaQuery && typeof pointerMediaQuery.addEventListener === 'function') {
+    pointerMediaQuery.addEventListener('change', (event) => {
+      isCoarsePointer = event.matches;
+    });
+  }
+
+  document.addEventListener('click', (event) => {
+    const icons = Array.from(activeTooltipIcons);
+    icons.forEach((icon) => {
+      if (!icon.contains(event.target)) {
+        icon.classList.remove('tooltip-visible');
+        activeTooltipIcons.delete(icon);
+      }
+    });
+  });
+
+  function metadataCacheKeyForUpload(file) {
+    if (!file) return null;
+    const name = file.name || 'uploaded';
+    const size = file.size || 0;
+    const modified = file.lastModified || 0;
+    return `upload|${name}|${size}|${modified}`;
+  }
+
+  function formatVideoMetadata(metadata) {
+    if (!metadata || typeof metadata !== 'object') {
+      return '';
+    }
+    const parts = [];
+    const fpsValue = Number(metadata.fps);
+    if (Number.isFinite(fpsValue)) {
+      parts.push(`${fpsValue.toFixed(2)} fps`);
+    }
+    const widthValue = Number(metadata.width);
+    const heightValue = Number(metadata.height);
+    if (Number.isFinite(widthValue) && Number.isFinite(heightValue)) {
+      parts.push(`${Math.round(widthValue)}×${Math.round(heightValue)}`);
+    }
+    const durationValue = Number(metadata.duration);
+    if (Number.isFinite(durationValue)) {
+      parts.push(`${durationValue.toFixed(2)} s`);
+    }
+    return parts.join(' • ');
+  }
+
+  function createWarningIcon(type, tooltip) {
+    const icon = document.createElement('span');
+    icon.className = `video-warning video-warning--${type}`;
+    icon.setAttribute('role', 'button');
+    icon.setAttribute('tabindex', '0');
+    icon.setAttribute('aria-label', tooltip);
+
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.setAttribute('fill', 'currentColor');
+
+    if (type === 'duration') {
+      svg.innerHTML = '<path d="M12 22a10 10 0 1 1 10-10 10.011 10.011 0 0 1-10 10Zm0-18a8 8 0 1 0 8 8 8.009 8.009 0 0 0-8-8Zm.5 4a1 1 0 0 0-1 1v4.25a1 1 0 0 0 .553.894l3 1.5a1 1 0 0 0 .894-1.788L13.5 12.76V9a1 1 0 0 0-1-1Z" />';
+    } else {
+      svg.innerHTML = '<path d="M12 2a10 10 0 0 0-9.33 13.648 1.25 1.25 0 0 0 1.147.779h16.366a1.25 1.25 0 0 0 1.147-.779A10 10 0 0 0 12 2Zm6.713 12.177H5.287A7.5 7.5 0 0 1 19.4 9.8a7.577 7.577 0 0 1-.687 4.377ZM11 6.75h2v4.5h-2Zm0 6h2v2h-2Z" />';
+    }
+
+    const tooltipEl = document.createElement('span');
+    tooltipEl.className = 'video-warning-tooltip';
+    tooltipEl.textContent = tooltip;
+    if (isCoarsePointer) {
+      const hint = document.createElement('span');
+      hint.className = 'video-warning-tooltip-hint';
+      hint.textContent = 'Tap again to dismiss';
+      tooltipEl.appendChild(document.createElement('br'));
+      tooltipEl.appendChild(hint);
+    }
+
+    icon.appendChild(svg);
+    icon.appendChild(tooltipEl);
+
+    icon.addEventListener('click', (event) => {
+      if (!isCoarsePointer) {
+        return;
+      }
+      event.preventDefault();
+      const willShow = !icon.classList.contains('tooltip-visible');
+      const icons = Array.from(activeTooltipIcons);
+      icons.forEach((other) => {
+        if (other !== icon) {
+          other.classList.remove('tooltip-visible');
+          activeTooltipIcons.delete(other);
+        }
+      });
+      if (willShow) {
+        icon.classList.add('tooltip-visible');
+        activeTooltipIcons.add(icon);
+      } else {
+        icon.classList.remove('tooltip-visible');
+        activeTooltipIcons.delete(icon);
+      }
+    });
+
+    icon.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        const willShow = !icon.classList.contains('tooltip-visible');
+        if (willShow) {
+          icon.classList.add('tooltip-visible');
+          activeTooltipIcons.add(icon);
+        } else {
+          icon.classList.remove('tooltip-visible');
+          activeTooltipIcons.delete(icon);
+        }
+      }
+    });
+
+    icon.addEventListener('blur', () => {
+      icon.classList.remove('tooltip-visible');
+      activeTooltipIcons.delete(icon);
+    });
+
+    return icon;
+  }
+
+  function applyVideoMetadata(container, metadata) {
+    if (!container) return;
+    container.classList.remove('video-meta--error');
+    container.textContent = '';
+    const text = formatVideoMetadata(metadata);
+    const textSpan = document.createElement('span');
+    textSpan.className = 'video-meta-text';
+    textSpan.textContent = text || 'Video metadata unavailable';
+    container.appendChild(textSpan);
+
+    const durationValue = Number(metadata?.duration);
+    if (Number.isFinite(durationValue) && durationValue > 5) {
+      container.appendChild(
+        createWarningIcon('duration', 'Only the first 5 seconds of this video will be used during training.')
+      );
+    }
+
+    const fpsValue = Number(metadata?.fps);
+    if (Number.isFinite(fpsValue) && Math.abs(fpsValue - 16) > 1) {
+      container.appendChild(
+        createWarningIcon(
+          'fps',
+          'WAN 2.2 was trained on 16 FPS. Videos over or under 16 FPS will cause slow-motion or sped-up issues in the result.'
+        )
+      );
+    }
+  }
+
+  async function fetchVideoMetadata(request) {
+    const response = await fetch('/get-metadata', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    });
+    if (!response.ok) {
+      throw new Error('Failed to read metadata');
+    }
+    return response.json();
+  }
+
+  async function fetchItemMetadata(item) {
+    if (!item || item.kind !== 'video') return null;
+
+    if (item.file instanceof File) {
+      const cacheKey = metadataCacheKeyForUpload(item.file);
+      if (cacheKey && metadataCache.has(cacheKey)) {
+        return metadataCache.get(cacheKey);
+      }
+      const formData = new FormData();
+      formData.append('upload', item.file, item.file.name || 'video.mp4');
+      const response = await fetch('/get-metadata', { method: 'POST', body: formData });
+      if (!response.ok) {
+        throw new Error('Failed to read metadata for upload');
+      }
+      const data = await response.json();
+      if (cacheKey) {
+        metadataCache.set(cacheKey, data);
+      }
+      return data;
+    }
+
+    const relativePath = item.relativePath || item.displayName || '';
+    if (!relativePath) {
+      return null;
+    }
+
+    let scope = SOURCE_TYPES.ACTIVE;
+    let datasetName = null;
+    if (item.source === SOURCE_TYPES.LIBRARY && item.libraryName) {
+      scope = 'library';
+      datasetName = item.libraryName;
+    } else {
+      scope = 'dataset';
+    }
+    const cacheKey = [scope, datasetName || '', relativePath].join('|');
+    if (metadataCache.has(cacheKey)) {
+      return metadataCache.get(cacheKey);
+    }
+    const payload = { scope, path: relativePath };
+    if (datasetName) {
+      payload.dataset_name = datasetName;
+    }
+    const data = await fetchVideoMetadata(payload);
+    metadataCache.set(cacheKey, data);
+    return data;
+  }
+
+  function extractMetadataFromVideo(videoEl, fallbackTitle = '') {
+    if (!videoEl) return null;
+    const durationValue = Number.isFinite(videoEl.duration) ? Number(videoEl.duration.toFixed(3)) : null;
+    const widthValue = Number.isFinite(videoEl.videoWidth) && videoEl.videoWidth > 0 ? videoEl.videoWidth : null;
+    const heightValue = Number.isFinite(videoEl.videoHeight) && videoEl.videoHeight > 0 ? videoEl.videoHeight : null;
+    if (durationValue == null && widthValue == null && heightValue == null) {
+      return null;
+    }
+    return {
+      title: fallbackTitle,
+      duration: durationValue,
+      width: widthValue,
+      height: heightValue,
+      fps: null,
+    };
+  }
+
+  async function loadCardVideoMetadata(item, container, videoEl) {
+    if (!container || !item || item.kind !== 'video') {
+      return;
+    }
+    try {
+      let metadata = await fetchItemMetadata(item);
+      if (metadata && videoEl) {
+        if (metadata.width == null && Number.isFinite(videoEl.videoWidth) && videoEl.videoWidth > 0) {
+          metadata.width = videoEl.videoWidth;
+        }
+        if (metadata.height == null && Number.isFinite(videoEl.videoHeight) && videoEl.videoHeight > 0) {
+          metadata.height = videoEl.videoHeight;
+        }
+        if (metadata.duration == null && Number.isFinite(videoEl.duration)) {
+          metadata.duration = Number(videoEl.duration.toFixed(3));
+        }
+      }
+      if (!metadata) {
+        metadata = extractMetadataFromVideo(videoEl, item.displayName || item.name || '');
+      }
+      if (!metadata) {
+        container.textContent = 'Video metadata unavailable';
+        container.classList.add('video-meta--error');
+        return;
+      }
+      applyVideoMetadata(container, metadata);
+    } catch (error) {
+      const fallback = extractMetadataFromVideo(videoEl, item.displayName || item.name || '');
+      if (fallback) {
+        applyVideoMetadata(container, fallback);
+        container.classList.add('video-meta--partial');
+        return;
+      }
+      container.textContent = 'Unable to load video metadata';
+      container.classList.add('video-meta--error');
+    }
+  }
 
   function normalizeRelativePath(value) {
     if (!value) return '';
@@ -1374,6 +1640,7 @@ EXAMPLES:
     });
     // Initial auto-resize
     setTimeout(autoResize, 0);
+    let videoElement = null;
     if (item.kind === 'image') {
       const img = document.createElement('img');
       const src = item.dataUrl || item.remoteUrl || '';
@@ -1396,7 +1663,11 @@ EXAMPLES:
       video.preload = 'metadata';
       video.style.maxWidth = '100%';
       video.style.maxHeight = '180px';
+      if (item.displayName) {
+        video.dataset.displayName = item.displayName;
+      }
       left.appendChild(video);
+      videoElement = video;
       // Revoke object URL when card is removed from DOM
       const observer = new MutationObserver((mutations) => {
         mutations.forEach((mutation) => {
@@ -1423,6 +1694,20 @@ EXAMPLES:
     fileNameEl.textContent = `${displayName}`;
     fileNameEl.title = displayName; // show full name on hover
     metaLeft.appendChild(fileNameEl);
+    let metadataEl = null;
+    if (item.kind === 'video') {
+      metadataEl = document.createElement('div');
+      metadataEl.className = 'video-meta';
+      metadataEl.textContent = 'Loading video metadata…';
+      metaLeft.appendChild(metadataEl);
+    }
+
+    if (item.kind === 'video' && metadataEl && videoElement) {
+      const refreshMetadata = () => loadCardVideoMetadata(item, metadataEl, videoElement);
+      loadCardVideoMetadata(item, metadataEl, videoElement);
+      videoElement.addEventListener('loadedmetadata', refreshMetadata, { once: true });
+      videoElement.addEventListener('error', refreshMetadata, { once: true });
+    }
 
     const metaRight = document.createElement('div');
     metaRight.className = 'meta-right';

@@ -725,6 +725,9 @@ input[type="file"].processing::after {
     border-bottom: 1px solid var(--border);
     padding-right: 0;
     padding-bottom: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
   }
 
   .caption {
@@ -1063,6 +1066,9 @@ progress::-moz-progress-bar {
   border-right: 1px solid var(--border);
   padding-right: 16px;
   min-width: 0; /* allow truncation */
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .meta .file-name {
@@ -1070,6 +1076,89 @@ progress::-moz-progress-bar {
   text-overflow: ellipsis;
   white-space: nowrap;
   display: block;
+}
+
+.video-meta {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.video-meta--error,
+.video-meta--partial {
+  color: #fbbf24;
+}
+
+.video-meta-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.video-warning {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.1rem;
+  height: 1.1rem;
+  border-radius: 999px;
+  cursor: pointer;
+  outline: none;
+}
+
+.video-warning svg {
+  width: 100%;
+  height: 100%;
+  fill: currentColor;
+}
+
+.video-warning:focus-visible {
+  box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.35);
+}
+
+.video-warning-tooltip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translate(-50%, 0);
+  background: rgba(20, 20, 20, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 0.45rem 0.65rem;
+  border-radius: 10px;
+  font-size: 11px;
+  white-space: nowrap;
+  color: var(--text);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  z-index: 20;
+}
+
+.video-warning:hover .video-warning-tooltip,
+.video-warning.tooltip-visible .video-warning-tooltip,
+.video-warning:focus-within .video-warning-tooltip {
+  opacity: 1;
+  transform: translate(-50%, -6px);
+  pointer-events: auto;
+}
+
+.video-warning-tooltip-hint {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.video-warning--duration {
+  color: #fbbf24;
+}
+
+.video-warning--fps {
+  color: #ef5350;
 }
 
 .meta .meta-right {
