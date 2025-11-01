@@ -9,7 +9,7 @@ import subprocess
 import tempfile
 from collections import deque
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, FrozenSet, List, Optional, Set
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
@@ -59,6 +59,7 @@ MEDIA_EXTENSIONS = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
 CAPTION_PRIORITY = {".txt": 0, ".caption": 1, ".json": 2}
 CAPTION_EXTENSIONS = set(CAPTION_PRIORITY)
 CAPTION_PREVIEW_LIMIT = 500
+PROTECTED_DATASET_DIRS: FrozenSet[str] = frozenset({"cache", "videocache"})
 RANGE_HEADER_RE = re.compile(r"bytes=(\d+)-(\d+)?")
 
 TOKEN_ENV_VAR = "JUPYTER_TOKEN"
@@ -306,6 +307,10 @@ class ExportPayload(BaseModel):
     dataset_name: Optional[str] = None
 
 
+class DeleteDatasetItem(BaseModel):
+    media_path: str = Field(min_length=1)
+
+
 class EventManager:
     def __init__(self) -> None:
         self._listeners: List[asyncio.Queue] = []
@@ -528,6 +533,8 @@ def _clear_dataset_directory() -> None:
             return
         for entry in DATASET_ROOT.iterdir():
             try:
+                if entry.is_dir() and entry.name.lower() in PROTECTED_DATASET_DIRS:
+                    continue
                 if entry.is_dir():
                     shutil.rmtree(entry)
                 else:
@@ -743,11 +750,13 @@ async def _export_dataset(
     items: List[ExportItem],
     uploads: Dict[str, UploadFile],
     target_root: Path,
+    preserve_dirs: Optional[Set[str]] = None,
 ) -> Dict[str, Any]:
     target_root = target_root.resolve()
     target_root.parent.mkdir(parents=True, exist_ok=True)
     temp_dir_path = Path(tempfile.mkdtemp(prefix="sillycaption_", dir=str(target_root.parent)))
     written = 0
+    preserved = {name.strip("/\\").lower() for name in preserve_dirs or set()}
 
     try:
         for item in items:
@@ -801,8 +810,29 @@ async def _export_dataset(
             written += 1
 
         if target_root.exists():
-            shutil.rmtree(target_root)
-        temp_dir_path.replace(target_root)
+            if preserved:
+                for entry in target_root.iterdir():
+                    if entry.is_dir() and entry.name.lower() in preserved:
+                        continue
+                    if entry.is_dir():
+                        shutil.rmtree(entry)
+                    else:
+                        entry.unlink()
+                for entry in temp_dir_path.iterdir():
+                    if entry.name.lower() in preserved:
+                        continue
+                    destination = target_root / entry.name
+                    if destination.exists():
+                        if destination.is_dir():
+                            shutil.rmtree(destination)
+                        else:
+                            destination.unlink()
+                    shutil.move(str(entry), destination)
+            else:
+                shutil.rmtree(target_root)
+                temp_dir_path.replace(target_root)
+        else:
+            temp_dir_path.replace(target_root)
         return {"written": written}
     finally:
         for upload in uploads.values():
@@ -812,6 +842,48 @@ async def _export_dataset(
                 pass
         if temp_dir_path.exists():
             shutil.rmtree(temp_dir_path, ignore_errors=True)
+
+
+def _delete_dataset_item(relative_path: str) -> Dict[str, Any]:
+    file_path = _resolve_dataset_file(relative_path)
+    deleted: List[str] = []
+    captions_removed: List[str] = []
+    relative_display = file_path.relative_to(DATASET_ROOT).as_posix()
+
+    try:
+        file_path.unlink()
+        deleted.append(relative_display)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="File not found") from exc
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to delete '{relative_display}': {exc}") from exc
+
+    for suffix in CAPTION_EXTENSIONS:
+        caption_path = file_path.with_suffix(suffix)
+        if not caption_path.exists() or not caption_path.is_file():
+            continue
+        try:
+            caption_path.unlink()
+            captions_removed.append(caption_path.relative_to(DATASET_ROOT).as_posix())
+        except OSError as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Removed media but failed to delete caption '{caption_path.name}': {exc}",
+            ) from exc
+
+    removed_count = 1 + len(captions_removed)
+    message = f"Removed '{relative_display}' from the dataset."
+    if captions_removed:
+        caption_count = len(captions_removed)
+        plural = "s" if caption_count != 1 else ""
+        message += f" Deleted {caption_count} caption file{plural}."
+
+    return {
+        "message": message,
+        "deleted": deleted,
+        "captions_removed": captions_removed,
+        "removed_count": removed_count,
+    }
 
 
 @app.get("/SillyCaption/api/active/items")
@@ -892,7 +964,12 @@ async def sillycaption_export_active(request: Request) -> Dict[str, Any]:
     form = await request.form()
     payload = await _parse_export_payload(form)
     uploads = _extract_uploads(form)
-    result = await _export_dataset(payload.items, uploads, DATASET_ROOT)
+    result = await _export_dataset(
+        payload.items,
+        uploads,
+        DATASET_ROOT,
+        preserve_dirs=PROTECTED_DATASET_DIRS,
+    )
     return {"message": "Active training dataset updated.", **result}
 
 
@@ -939,6 +1016,12 @@ async def upload(files: List[UploadFile] = File(...)) -> Dict:
 async def dataset_files() -> Dict[str, Any]:
     items = _collect_dataset_items()
     return {"items": items, "total": len(items)}
+
+
+@app.post("/dataset/delete")
+async def dataset_delete(payload: DeleteDatasetItem) -> Dict[str, Any]:
+    result = _delete_dataset_item(payload.media_path)
+    return result
 
 
 def _iter_file_chunks(file_path: Path, start: int = 0, end: Optional[int] = None, chunk_size: int = 1024 * 1024):
