@@ -18,6 +18,7 @@
     datasetOrigin: null,
     integrationBusy: false,
     libraryDatasets: [],
+    preparingDownloadZip: false,
   };
 
   const ui = {
@@ -43,6 +44,7 @@
     btnClear: el('btnClear'),
     btnClearAllCaptions: el('btnClearAllCaptions'),
     btnSaveZip: el('btnSaveZip'),
+    btnDownloadDatasetZip: el('btnDownloadDatasetZip'),
     progressText: el('progressText'),
     progressBar: el('progressBar'),
     results: el('results'),
@@ -150,7 +152,7 @@
   }
 
   function updateDatasetControlsDisabled() {
-    const busy = state.running || state.integrationBusy;
+    const busy = state.running || state.integrationBusy || state.preparingDownloadZip;
     const hasItems = hasCurrentItems();
 
     if (ui.btnImportActive) {
@@ -173,6 +175,7 @@
       const name = (ui.libraryNameInput && ui.libraryNameInput.value.trim()) || '';
       ui.btnExportLibrary.disabled = busy || !hasItems || name.length === 0;
     }
+    updateDownloadDatasetZipButton();
   }
 
   function applyItemsToUI(items, { origin = null, statusMessage = '', statusError = false } = {}) {
@@ -191,6 +194,7 @@
     }
 
     updateSaveZipButton();
+    updateDownloadDatasetZipButton();
     setDatasetOrigin(origin);
     if (statusMessage !== undefined) {
       setDatasetStatus(statusMessage, statusError);
@@ -506,6 +510,7 @@ EXAMPLES:
     setDatasetOrigin(null);
     setDatasetStatus('');
     updateSaveZipButton();
+    updateDownloadDatasetZipButton();
   });
 
   ui.btnClearAllCaptions?.addEventListener('click', () => {
@@ -1579,6 +1584,219 @@ EXAMPLES:
     ui.btnSaveZip.disabled = !hasSavableCaptions();
   }
 
+  function itemHasDownloadSource(item) {
+    if (!item) return false;
+    if (item.file instanceof File) return true;
+    if (typeof item.remoteUrl === 'string' && item.remoteUrl) return true;
+    if (typeof item.dataUrl === 'string' && item.dataUrl.startsWith('data:')) return true;
+    return false;
+  }
+
+  function hasDownloadableItems() {
+    if (!Array.isArray(state.currentItems)) return false;
+    return state.currentItems.some((item) => itemHasDownloadSource(item));
+  }
+
+  function updateDownloadDatasetZipButton() {
+    if (!ui.btnDownloadDatasetZip) return;
+    const busy = state.running || state.integrationBusy || state.preparingDownloadZip;
+    ui.btnDownloadDatasetZip.disabled = !hasDownloadableItems() || busy;
+  }
+
+  function guessExtensionFromType(type, kind) {
+    if (typeof type !== 'string' || !type.includes('/')) {
+      return kind === 'video' ? '.mp4' : '.png';
+    }
+    const subtypeRaw = type.split('/')[1] || '';
+    const subtype = subtypeRaw.split(';')[0].split('+')[0].toLowerCase();
+    if (!subtype) {
+      return kind === 'video' ? '.mp4' : '.png';
+    }
+    if (subtype === 'jpeg') return '.jpg';
+    if (subtype === 'plain') return '.txt';
+    return subtype.startsWith('.') ? subtype : `.${subtype}`;
+  }
+
+  function sanitizePathForZip(path) {
+    if (!path || typeof path !== 'string') return '';
+    return path
+      .split('/')
+      .map((segment) => segment
+        .replace(/^[.]+/g, '')
+        .replace(/[<>:"\\|?*]/g, '_')
+        .trim())
+      .filter((segment) => segment && segment !== '.' && segment !== '..')
+      .join('/');
+  }
+
+  function ensureExtension(filename, extension) {
+    if (!filename || typeof filename !== 'string') {
+      return extension ? `item${extension}` : 'item';
+    }
+    if (/\.[^./]+$/i.test(filename)) return filename;
+    return `${filename}${extension}`;
+  }
+
+  function getItemDownloadPath(item, index, effectiveType) {
+    const fallbackExt = guessExtensionFromType(effectiveType || item?.type, item?.kind);
+    const fallbackName = `item_${index + 1}${fallbackExt}`;
+    const candidates = [item?.relativePath, item?.displayName, item?.name];
+    let chosen = '';
+    for (const candidate of candidates) {
+      if (typeof candidate !== 'string' || candidate.trim().length === 0) continue;
+      const normalized = normalizeRelativePath(candidate);
+      const sanitized = sanitizePathForZip(normalized);
+      if (sanitized) {
+        chosen = sanitized;
+        break;
+      }
+    }
+    if (!chosen) {
+      chosen = sanitizePathForZip(fallbackName) || fallbackName;
+    }
+    chosen = ensureExtension(chosen, fallbackExt);
+    return chosen;
+  }
+
+  function dataUrlToBlob(dataUrl) {
+    if (!dataUrl || typeof dataUrl !== 'string') {
+      return new Blob();
+    }
+    const parts = dataUrl.split(',');
+    if (parts.length < 2) {
+      return new Blob();
+    }
+    const meta = parts[0];
+    const data = parts[1];
+    const isBase64 = /;base64$/i.test(meta);
+    const mimeMatch = meta.match(/^data:([^;]+)/i);
+    const mime = mimeMatch ? mimeMatch[1] : 'application/octet-stream';
+    if (isBase64) {
+      const binary = atob(data);
+      const len = binary.length;
+      const bytes = new Uint8Array(len);
+      for (let i = 0; i < len; i += 1) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+      return new Blob([bytes], { type: mime });
+    }
+    const decoded = decodeURIComponent(data);
+    return new Blob([decoded], { type: mime });
+  }
+
+  async function getItemBinary(item) {
+    if (!item) {
+      throw new Error('Invalid dataset item.');
+    }
+    if (item.file instanceof File) {
+      const buffer = await item.file.arrayBuffer();
+      const type = item.file.type || item.type || 'application/octet-stream';
+      return { buffer, type };
+    }
+    if (typeof item.remoteUrl === 'string' && item.remoteUrl) {
+      const response = await fetch(item.remoteUrl, { credentials: 'same-origin' });
+      if (!response.ok) {
+        throw new Error(`Failed to fetch media for ${item.displayName || item.name || 'item'} (${response.status})`);
+      }
+      const blob = await response.blob();
+      const buffer = await blob.arrayBuffer();
+      return { buffer, type: blob.type || item.type || 'application/octet-stream' };
+    }
+    if (typeof item.dataUrl === 'string' && item.dataUrl.startsWith('data:')) {
+      const blob = dataUrlToBlob(item.dataUrl);
+      const buffer = await blob.arrayBuffer();
+      return { buffer, type: blob.type || item.type || 'application/octet-stream' };
+    }
+    throw new Error(`No media data available for ${item.displayName || item.name || 'item'}.`);
+  }
+
+  function getCaptionForItem(item) {
+    if (!item) return '';
+    const entry = resultsStore.get(item.name);
+    if (entry && entry.error) return '';
+    if (entry && typeof entry.caption === 'string' && entry.caption.trim().length > 0) {
+      return entry.caption;
+    }
+    if (typeof item.initialCaption === 'string' && item.initialCaption.trim().length > 0) {
+      return item.initialCaption;
+    }
+    return '';
+  }
+
+  async function downloadDatasetZip() {
+    if (!hasDownloadableItems()) {
+      alert('Load or upload a dataset before downloading.');
+      return;
+    }
+    if (typeof JSZip === 'undefined') {
+      alert('ZIP library not available.');
+      return;
+    }
+    state.preparingDownloadZip = true;
+    updateDatasetControlsDisabled();
+    try {
+      const items = Array.isArray(state.currentItems) ? state.currentItems : [];
+      if (items.length === 0) {
+        throw new Error('No dataset items to include.');
+      }
+      setDatasetStatus('Preparing dataset ZIP…');
+      const zip = new JSZip();
+      let added = 0;
+      const skipped = [];
+      for (let i = 0; i < items.length; i += 1) {
+        const item = items[i];
+        if (!itemHasDownloadSource(item)) {
+          skipped.push(item.displayName || item.name || `item_${i + 1}`);
+          continue;
+        }
+        let binary;
+        try {
+          binary = await getItemBinary(item);
+        } catch (error) {
+          skipped.push(item.displayName || item.name || `item_${i + 1}`);
+          continue;
+        }
+        const filePath = getItemDownloadPath(item, i, binary.type);
+        zip.file(filePath, binary.buffer);
+        const captionText = getCaptionForItem(item);
+        if (captionText && captionText.trim().length > 0) {
+          const captionPath = filePath.replace(/\.[^./]+$/, '') + '.txt';
+          zip.file(captionPath, captionText);
+        }
+        added += 1;
+        if (items.length > 1) {
+          setDatasetStatus(`Preparing dataset ZIP… (${i + 1}/${items.length})`);
+        }
+      }
+      if (added === 0) {
+        const reason = skipped.length ? `Unable to include ${skipped.length} item${skipped.length === 1 ? '' : 's'}.` : 'No media could be added to the ZIP.';
+        throw new Error(reason);
+      }
+      const blob = await zip.generateAsync({ type: 'blob' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'sillycaption-dataset.zip';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        URL.revokeObjectURL(a.href);
+        a.remove();
+      }, 0);
+      if (skipped.length > 0) {
+        setDatasetStatus(`Dataset ZIP ready (skipped ${skipped.length} item${skipped.length === 1 ? '' : 's'}).`, true);
+      } else {
+        setDatasetStatus('Dataset ZIP ready for download.');
+      }
+    } catch (error) {
+      const message = error && error.message ? error.message : 'Failed to prepare dataset ZIP.';
+      setDatasetStatus(message, true);
+      alert(message);
+    } finally {
+      state.preparingDownloadZip = false;
+      updateDatasetControlsDisabled();
+    }
+  }
+
   ui.btnSaveZip.addEventListener('click', async () => {
     try {
       const entries = Array.from(resultsStore.entries())
@@ -1607,6 +1825,10 @@ EXAMPLES:
     } catch (e) {
       alert(`Failed to create ZIP: ${e && e.message ? e.message : String(e)}`);
     }
+  });
+
+  ui.btnDownloadDatasetZip?.addEventListener('click', () => {
+    downloadDatasetZip();
   });
 
   function createRateLimiter({ rps, concurrency }) {
