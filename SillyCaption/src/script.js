@@ -1013,16 +1013,17 @@ EXAMPLES:
     }
 
     const inputFiles = Array.from(ui.files?.files || []);
+    const hasPreloadedItems = Array.isArray(state.currentItems) && state.currentItems.length > 0;
 
-    if (inputFiles.length === 0) {
+    if (inputFiles.length === 0 && !hasPreloadedItems) {
       alert('Please select at least one input image or video file.');
       return;
     }
-    if (!state.currentItems || state.currentItems.length === 0) {
+    if (!hasPreloadedItems && inputFiles.length > 0) {
       await refreshItemsFromFiles();
     }
 
-    const items = state.currentItems || [];
+    const items = Array.isArray(state.currentItems) ? state.currentItems : [];
     let itemsToProcess = items;
 
     if (onlyUncaptioned) {
