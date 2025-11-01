@@ -10,6 +10,7 @@
     running: false,
     models: [],
     openRouterModels: [], // Store OpenRouter models separately
+    modelsLoaded: false,
     // Sequence guards to avoid race conditions between concurrent fetches
     openRouterFetchSeq: 0,
     currentItems: [],
@@ -94,6 +95,12 @@
 
   function makeItemName(prefix, relativePath, fallback = '') {
     const normalized = normalizeRelativePath(relativePath);
+    if (prefix === SOURCE_TYPES.ACTIVE) {
+      if (normalized) return normalized;
+      if (fallback) return fallback;
+      uploadCounter += 1;
+      return `item_${uploadCounter}`;
+    }
     if (normalized) {
       return `${prefix}:${normalized}`;
     }
@@ -1888,10 +1895,15 @@ Instructions: ${systemPrompt}`;
           originalIndex: index, // Store original chronological order
           isLocal: false
         }));
+      state.modelsLoaded = true;
       ensurePreferredModelSelected();
+      renderModelOptions();
     } catch (error) {
       console.error('Failed to fetch models:', error);
       ui.progressText.textContent = 'Error: Could not load models';
+      state.models = [];
+      state.modelsLoaded = true;
+      renderModelOptions();
     }
   }
 
@@ -1911,6 +1923,14 @@ Instructions: ${systemPrompt}`;
   function renderModelOptions() {
     if (!ui.modelOptions) return;
 
+    ui.modelOptions.innerHTML = '';
+
+    if (!state.models || state.models.length === 0) {
+      const message = state.modelsLoaded ? 'No models found' : 'Loading models…';
+      ui.modelOptions.innerHTML = `<div class="custom-option">${message}</div>`;
+      return;
+    }
+
     const provider = ui.providerFilter?.value || 'all';
     const searchTerm = (ui.modelSearch?.value || '').toLowerCase();
     const sortOrder = ui.sortOrder?.value || 'chronological';
@@ -1929,8 +1949,6 @@ Instructions: ${systemPrompt}`;
     } else if (sortOrder === 'chronological') {
       filteredModels.sort((a, b) => a.originalIndex - b.originalIndex);
     }
-
-    ui.modelOptions.innerHTML = '';
 
     if (filteredModels.length === 0) {
       ui.modelOptions.innerHTML = '<div class="custom-option">No models found</div>';
@@ -1993,6 +2011,7 @@ Instructions: ${systemPrompt}`;
     if (!ui.customSelect || !ui.customSelectTrigger) return;
 
     ui.customSelectTrigger.addEventListener('click', () => {
+      renderModelOptions();
       ui.customSelect.classList.toggle('open');
     });
 

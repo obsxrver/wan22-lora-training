@@ -22,6 +22,7 @@
         background: var(--bg);
         color: var(--text);
         min-height: 100vh;
+        overflow-x: hidden;
       }
 
       header {
@@ -224,6 +225,8 @@
 
       .dataset-card video.dataset-card-media {
         object-fit: cover;
+        width: 100%;
+        height: 100%;
       }
 
       .dataset-card-body {
@@ -645,6 +648,8 @@
           mediaElement.loop = true;
           mediaElement.playsInline = true;
           mediaElement.setAttribute('playsinline', '');
+          mediaElement.setAttribute('webkit-playsinline', '');
+          mediaElement.setAttribute('muted', '');
           mediaElement.controls = true;
           mediaElement.setAttribute('controlslist', 'nodownload noremoteplayback');
           mediaElement.draggable = false;

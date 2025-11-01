@@ -59,10 +59,12 @@ MEDIA_EXTENSIONS = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
 CAPTION_PRIORITY = {".txt": 0, ".caption": 1, ".json": 2}
 CAPTION_EXTENSIONS = set(CAPTION_PRIORITY)
 CAPTION_PREVIEW_LIMIT = 500
+RANGE_HEADER_RE = re.compile(r"bytes=(\d+)-(\d+)?")
 
 TOKEN_ENV_VAR = "JUPYTER_TOKEN"
 AUTH_COOKIE_NAME = "token"
 AUTH_QUERY_PARAM = "token"
+AUTH_COOKIE_MAX_AGE = 60 * 60 * 24 * 30  # 30 days
 
 
 def _load_auth_token() -> str:
@@ -85,6 +87,18 @@ class TokenAuthMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self._token = token
 
+    def _set_auth_cookie(self, response, scheme: str) -> None:
+        response.set_cookie(
+            AUTH_COOKIE_NAME,
+            self._token,
+            httponly=True,
+            secure=scheme == "https",
+            samesite="lax",
+            path="/",
+            max_age=AUTH_COOKIE_MAX_AGE,
+            expires=AUTH_COOKIE_MAX_AGE,
+        )
+
     async def dispatch(self, request: Request, call_next):
         if not self._token:
             return await call_next(request)
@@ -106,27 +120,15 @@ class TokenAuthMiddleware(BaseHTTPMiddleware):
         if token_source == "query" and request.method in {"GET", "HEAD"}:
             redirect_url = request.url.remove_query_params(AUTH_QUERY_PARAM)
             response = RedirectResponse(url=str(redirect_url), status_code=303)
-            response.set_cookie(
-                AUTH_COOKIE_NAME,
-                self._token,
-                httponly=True,
-                secure=redirect_url.scheme == "https",
-                samesite="lax",
-                path="/",
-            )
+            self._set_auth_cookie(response, redirect_url.scheme)
             return response
 
         response = await call_next(request)
 
         if token_source == "query" and cookie_token != self._token:
-            response.set_cookie(
-                AUTH_COOKIE_NAME,
-                self._token,
-                httponly=True,
-                secure=request.url.scheme == "https",
-                samesite="lax",
-                path="/",
-            )
+            self._set_auth_cookie(response, request.url.scheme)
+        elif token_source == "cookie":
+            self._set_auth_cookie(response, request.url.scheme)
 
         return response
 
@@ -596,7 +598,7 @@ def _collect_dataset_items() -> List[Dict[str, Any]]:
         stem_key = file_path.stem.lower()
         caption_info = captions.get((parent_key, stem_key), {})
         media_path = relative.as_posix()
-        media_url = f"/dataset/image/{media_path}"
+        media_url = f"/dataset/media/{media_path}"
         media_kind = "video" if suffix in VIDEO_EXTENSIONS else "image"
 
         item: Dict[str, Any] = {
@@ -939,15 +941,64 @@ async def dataset_files() -> Dict[str, Any]:
     return {"items": items, "total": len(items)}
 
 
-@app.get("/dataset/image/{path:path}")
-async def dataset_image(path: str) -> StreamingResponse:
+def _iter_file_chunks(file_path: Path, start: int = 0, end: Optional[int] = None, chunk_size: int = 1024 * 1024):
+    with file_path.open("rb") as stream:
+        stream.seek(start)
+        bytes_remaining = (end - start + 1) if end is not None else None
+        while True:
+            if bytes_remaining is not None and bytes_remaining <= 0:
+                break
+            read_size = chunk_size if bytes_remaining is None else min(chunk_size, bytes_remaining)
+            data = stream.read(read_size)
+            if not data:
+                break
+            if bytes_remaining is not None:
+                bytes_remaining -= len(data)
+            yield data
+
+
+@app.get("/dataset/media/{path:path}")
+async def dataset_media(path: str, request: Request) -> StreamingResponse:
     try:
         file_path = _resolve_dataset_file(path)
     except HTTPException:
         raise
+
     media_type, _ = mimetypes.guess_type(str(file_path))
     media_type = media_type or "application/octet-stream"
-    return StreamingResponse(file_path.open("rb"), media_type=media_type)
+    file_size = file_path.stat().st_size
+    range_header = request.headers.get("range")
+    if range_header:
+        range_value = range_header.strip().lower()
+        match = RANGE_HEADER_RE.match(range_value)
+        if not match:
+            raise HTTPException(status_code=416, detail="Invalid Range header")
+        start = int(match.group(1))
+        end = match.group(2)
+        if start >= file_size:
+            raise HTTPException(status_code=416, detail="Requested range not satisfiable")
+        end = int(end) if end is not None else file_size - 1
+        end = min(end, file_size - 1)
+        if end < start:
+            raise HTTPException(status_code=416, detail="Requested range not satisfiable")
+        content_length = end - start + 1
+        headers = {
+            "Content-Range": f"bytes {start}-{end}/{file_size}",
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(content_length),
+        }
+        return StreamingResponse(
+            _iter_file_chunks(file_path, start=start, end=end),
+            status_code=206,
+            media_type=media_type,
+            headers=headers,
+        )
+
+    headers = {
+        "Accept-Ranges": "bytes",
+        "Content-Length": str(file_size),
+    }
+    return StreamingResponse(_iter_file_chunks(file_path), media_type=media_type, headers=headers)
 
 
 @app.get("/cloud-status")
