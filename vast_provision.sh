@@ -117,6 +117,16 @@ fi
     split_files/diffusion_models/wan2.2_t2v_low_noise_14B_fp16.safetensors \
     --local-dir models/diffusion_models &
 
+  hf download \
+    Comfy-Org/Wan_2.2_ComfyUI_Repackaged \
+    split_files/diffusion_models/wan2.2_i2v_high_noise_14B_fp16.safetensors \
+    --local-dir models/diffusion_models &
+
+  hf download \
+    Comfy-Org/Wan_2.2_ComfyUI_Repackaged \
+    split_files/diffusion_models/wan2.2_i2v_low_noise_14B_fp16.safetensors \
+    --local-dir models/diffusion_models &
+
   wait
 ) & pids+=($!)
 
