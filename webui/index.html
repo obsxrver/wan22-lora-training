@@ -350,6 +350,48 @@
         accent-color: var(--accent);
       }
 
+      input[type="radio"] {
+        width: 1rem;
+        height: 1rem;
+        accent-color: var(--accent);
+      }
+
+      .mode-fieldset {
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 1rem 1.25rem;
+        background: rgba(255, 255, 255, 0.04);
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+      }
+
+      .mode-fieldset legend {
+        padding: 0 0.35rem;
+        font-weight: 700;
+        color: var(--text);
+      }
+
+      .mode-options {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1rem;
+      }
+
+      .mode-option {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-weight: 600;
+        color: var(--muted);
+      }
+
+      .mode-hint {
+        margin: 0;
+        font-size: 0.85rem;
+        color: var(--muted);
+      }
+
       .toggle {
         display: flex;
         align-items: center;
@@ -540,6 +582,22 @@
               Dataset config path
               <input type="text" name="datasetPath" value="/workspace/musubi-tuner/dataset/dataset.toml" required />
             </label>
+          </div>
+          <div class="form-row">
+            <fieldset class="mode-fieldset">
+              <legend>Training task</legend>
+              <div class="mode-options" role="radiogroup" aria-label="Training task">
+                <label class="mode-option">
+                  <input type="radio" name="trainingMode" value="t2v" checked />
+                  <span>Text to Video (T2V)</span>
+                </label>
+                <label class="mode-option">
+                  <input type="radio" name="trainingMode" value="i2v" />
+                  <span>Image to Video (I2V)</span>
+                </label>
+              </div>
+              <p class="mode-hint">Choose I2V to train with the image-to-video task and models.</p>
+            </fieldset>
           </div>
           <div class="form-row two-col">
             <label>
@@ -1276,6 +1334,8 @@
       async function startTraining(event) {
         event.preventDefault();
         const formData = new FormData(form);
+        const trainingModeRaw = (formData.get('trainingMode') || 't2v').toString().toLowerCase();
+        const trainingMode = trainingModeRaw === 'i2v' ? 'i2v' : 't2v';
         const payload = {
           title_suffix: (formData.get('titleSuffix') || '').toString().trim() || 'mylora',
           author: (formData.get('author') || '').toString().trim() || 'authorName',
@@ -1286,6 +1346,7 @@
           upload_cloud: formData.get('uploadCloud') === 'on',
           shutdown_instance: formData.get('shutdownInstance') === 'on',
           auto_confirm: true,
+          training_mode: trainingMode,
         };
 
         if (currentCloudStatus && !currentCloudStatus.can_upload) {

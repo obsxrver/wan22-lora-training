@@ -13,8 +13,10 @@ ACCELERATE="$MUSUBI_DIR/venv/bin/accelerate"
 
 VAE="$MUSUBI_DIR/models/vae/split_files/vae/wan_2.1_vae.safetensors"
 T5="$MUSUBI_DIR/models/text_encoders/models_t5_umt5-xxl-enc-bf16.pth"
-HIGH_DIT="$MUSUBI_DIR/models/diffusion_models/split_files/diffusion_models/wan2.2_t2v_high_noise_14B_fp16.safetensors"
-LOW_DIT="$MUSUBI_DIR/models/diffusion_models/split_files/diffusion_models/wan2.2_t2v_low_noise_14B_fp16.safetensors"
+T2V_HIGH_DIT="$MUSUBI_DIR/models/diffusion_models/split_files/diffusion_models/wan2.2_t2v_high_noise_14B_fp16.safetensors"
+T2V_LOW_DIT="$MUSUBI_DIR/models/diffusion_models/split_files/diffusion_models/wan2.2_t2v_low_noise_14B_fp16.safetensors"
+I2V_HIGH_DIT="$MUSUBI_DIR/models/diffusion_models/split_files/diffusion_models/wan2.2_i2v_high_noise_14B_fp16.safetensors"
+I2V_LOW_DIT="$MUSUBI_DIR/models/diffusion_models/split_files/diffusion_models/wan2.2_i2v_low_noise_14B_fp16.safetensors"
 DEFAULT_DATASET="$MUSUBI_DIR/dataset/dataset.toml"
 
 # CLI overrides (populated via command line flags or environment variables)
@@ -26,6 +28,7 @@ CPU_THREADS_INPUT="${WAN_CPU_THREADS_PER_PROCESS:-}"
 MAX_WORKERS_INPUT="${WAN_MAX_DATA_LOADER_WORKERS:-}"
 CLI_UPLOAD_CLOUD="${WAN_UPLOAD_CLOUD:-}"
 CLI_SHUTDOWN_INSTANCE="${WAN_SHUTDOWN_INSTANCE:-}"
+TRAINING_MODE_INPUT="${WAN_TRAINING_MODE:-}"
 AUTO_CONFIRM=0
 
 CLOUD_PERMISSION_DENIED=0
@@ -45,13 +48,14 @@ Optional arguments (all fall back to interactive prompts when omitted):
   --max-data-loader-workers N      Data loader workers
   --upload-cloud [Y|N]             Upload outputs to configured cloud storage
   --shutdown-instance [Y|N]        Shut down Vast.ai instance after training
+  --mode [t2v|i2v]                 Select the training task (text-to-video or image-to-video)
   --auto-confirm                   Skip the final confirmation prompt
   --help                           Show this message and exit
 
 Environment variable overrides:
   WAN_TITLE_SUFFIX, WAN_AUTHOR, WAN_DATASET_PATH, WAN_SAVE_EVERY,
   WAN_CPU_THREADS_PER_PROCESS, WAN_MAX_DATA_LOADER_WORKERS,
-  WAN_UPLOAD_CLOUD, WAN_SHUTDOWN_INSTANCE
+  WAN_UPLOAD_CLOUD, WAN_SHUTDOWN_INSTANCE, WAN_TRAINING_MODE
 EOF
 }
 
@@ -101,6 +105,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --shutdown-instance)
       CLI_SHUTDOWN_INSTANCE="$2"
+      shift 2
+      ;;
+    --mode)
+      TRAINING_MODE_INPUT="$2"
       shift 2
       ;;
     --auto-confirm)
@@ -558,6 +566,47 @@ main() {
   fi
   DATASET=${DATASET:-$DEFAULT_DATASET}
 
+  local training_mode="$TRAINING_MODE_INPUT"
+  if [[ -z "${training_mode:-}" ]]; then
+    if (( AUTO_CONFIRM )); then
+      training_mode="t2v"
+      echo "Training task (auto default): $training_mode"
+    else
+      read -r -p "Training task (t2v/i2v, default: t2v): " training_mode || true
+    fi
+  else
+    echo "Training task (auto): $training_mode"
+  fi
+  training_mode=${training_mode:-t2v}
+  training_mode=${training_mode,,}
+
+  local TRAIN_TASK
+  local HIGH_TITLE
+  local LOW_TITLE
+  local -a CACHE_LATENTS_ARGS=()
+
+  case "$training_mode" in
+    t2v)
+      TRAIN_TASK="t2v-A14B"
+      HIGH_DIT="$T2V_HIGH_DIT"
+      LOW_DIT="$T2V_LOW_DIT"
+      HIGH_TITLE="WAN2.2-T2V-HighNoise_${TITLE_SUFFIX}"
+      LOW_TITLE="WAN2.2-T2V-LowNoise_${TITLE_SUFFIX}"
+      ;;
+    i2v)
+      TRAIN_TASK="i2v-A14B"
+      HIGH_DIT="$I2V_HIGH_DIT"
+      LOW_DIT="$I2V_LOW_DIT"
+      HIGH_TITLE="WAN2.2-I2V-HighNoise_${TITLE_SUFFIX}"
+      LOW_TITLE="WAN2.2-I2V-LowNoise_${TITLE_SUFFIX}"
+      CACHE_LATENTS_ARGS+=(--i2v)
+      ;;
+    *)
+      echo "Invalid training mode: $training_mode. Use 't2v' or 'i2v'." >&2
+      exit 1
+      ;;
+  esac
+
   if [[ ! -f "$DATASET" ]]; then
     echo "Dataset config not found at $DATASET; downloading..."
     mkdir -p "$(dirname "$DATASET")"
@@ -607,9 +656,6 @@ main() {
     echo "Max data loader workers (auto): $MAX_DATA_LOADER_WORKERS"
   fi
   MAX_DATA_LOADER_WORKERS=${MAX_DATA_LOADER_WORKERS:-$DEFAULT_MAX_DATA_LOADER_WORKERS}
-
-  HIGH_TITLE="WAN2.2-HighNoise_${TITLE_SUFFIX}"
-  LOW_TITLE="WAN2.2-LowNoise_${TITLE_SUFFIX}"
 
   echo ""
   echo "=== Post-Training Options ==="
@@ -699,6 +745,8 @@ main() {
   echo "  Low title:  $LOW_TITLE"
   echo "  Author:     $AUTHOR"
   echo "  Save every: $SAVE_EVERY epochs"
+  echo "  Task:       $TRAIN_TASK"
+  echo "  Mode:       ${training_mode^^}"
   echo "  Upload to cloud: $UPLOAD_CLOUD"
   echo "  Auto-shutdown: $SHUTDOWN_INSTANCE"
   echo ""
@@ -735,9 +783,16 @@ main() {
   echo "  --max_data_loader_n_workers: $MAX_DATA_LOADER_WORKERS"
 
   echo "Caching latents..."
-  "$PYTHON" src/musubi_tuner/wan_cache_latents.py \
-    --dataset_config "$DATASET" \
+  local CACHE_LATENTS_CMD=(
+    "$PYTHON"
+    src/musubi_tuner/wan_cache_latents.py
+    --dataset_config "$DATASET"
     --vae "$VAE"
+  )
+  if (( ${#CACHE_LATENTS_ARGS[@]} )); then
+    CACHE_LATENTS_CMD+=("${CACHE_LATENTS_ARGS[@]}")
+  fi
+  "${CACHE_LATENTS_CMD[@]}"
 
   echo "Caching text encoder outputs..."
   "$PYTHON" src/musubi_tuner/wan_cache_text_encoder_outputs.py \
@@ -756,7 +811,7 @@ main() {
   echo "Starting HIGH on GPU $HIGH_GPU (port $HIGH_PORT) -> run_high.log"
   MASTER_ADDR=127.0.0.1 MASTER_PORT="$HIGH_PORT" CUDA_VISIBLE_DEVICES="$HIGH_GPU" \
   "$ACCELERATE" launch --num_cpu_threads_per_process "$CPU_THREADS_PER_PROCESS" --num_processes 1 --main_process_port "$HIGH_PORT" src/musubi_tuner/wan_train_network.py \
-    --task t2v-A14B \
+    --task "$TRAIN_TASK" \
     --dit "$HIGH_DIT" \
     --vae "$VAE" \
     --t5 "$T5" \
@@ -804,7 +859,7 @@ main() {
   echo "Starting LOW on GPU $LOW_GPU (port $LOW_PORT) -> run_low.log"
   MASTER_ADDR=127.0.0.1 MASTER_PORT="$LOW_PORT" CUDA_VISIBLE_DEVICES="$LOW_GPU" \
   "$ACCELERATE" launch --num_cpu_threads_per_process "$CPU_THREADS_PER_PROCESS" --num_processes 1 --main_process_port "$LOW_PORT" src/musubi_tuner/wan_train_network.py \
-    --task t2v-A14B \
+    --task "$TRAIN_TASK" \
     --dit "$LOW_DIT" \
     --vae "$VAE" \
     --t5 "$T5" \

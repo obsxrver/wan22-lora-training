@@ -287,6 +287,7 @@ class TrainRequest(BaseModel):
     upload_cloud: bool = True
     shutdown_instance: bool = True
     auto_confirm: bool = True
+    training_mode: Literal["t2v", "i2v"] = "t2v"
 
 
 class ApiKeyRequest(BaseModel):
@@ -1270,6 +1271,7 @@ def build_command(payload: TrainRequest) -> List[str]:
         args.extend(["--max-data-loader-workers", str(payload.max_data_loader_workers)])
     args.extend(["--upload-cloud", "Y" if payload.upload_cloud else "N"])
     args.extend(["--shutdown-instance", "Y" if payload.shutdown_instance else "N"])
+    args.extend(["--mode", payload.training_mode])
     if payload.auto_confirm:
         args.append("--auto-confirm")
     return args
