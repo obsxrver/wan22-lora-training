@@ -29,6 +29,7 @@ MAX_WORKERS_INPUT="${WAN_MAX_DATA_LOADER_WORKERS:-}"
 CLI_UPLOAD_CLOUD="${WAN_UPLOAD_CLOUD:-}"
 CLI_SHUTDOWN_INSTANCE="${WAN_SHUTDOWN_INSTANCE:-}"
 TRAINING_MODE_INPUT="${WAN_TRAINING_MODE:-}"
+NOISE_MODE_INPUT="${WAN_NOISE_MODE:-}"
 AUTO_CONFIRM=0
 
 CLOUD_PERMISSION_DENIED=0
@@ -49,13 +50,15 @@ Optional arguments (all fall back to interactive prompts when omitted):
   --upload-cloud [Y|N]             Upload outputs to configured cloud storage
   --shutdown-instance [Y|N]        Shut down Vast.ai instance after training
   --mode [t2v|i2v]                 Select the training task (text-to-video or image-to-video)
+  --noise-mode [both|high|low]     Choose whether to train high noise, low noise, or both
   --auto-confirm                   Skip the final confirmation prompt
   --help                           Show this message and exit
 
 Environment variable overrides:
   WAN_TITLE_SUFFIX, WAN_AUTHOR, WAN_DATASET_PATH, WAN_SAVE_EVERY,
   WAN_CPU_THREADS_PER_PROCESS, WAN_MAX_DATA_LOADER_WORKERS,
-  WAN_UPLOAD_CLOUD, WAN_SHUTDOWN_INSTANCE, WAN_TRAINING_MODE
+  WAN_UPLOAD_CLOUD, WAN_SHUTDOWN_INSTANCE, WAN_TRAINING_MODE,
+  WAN_NOISE_MODE
 EOF
 }
 
@@ -109,6 +112,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --mode)
       TRAINING_MODE_INPUT="$2"
+      shift 2
+      ;;
+    --noise-mode)
+      NOISE_MODE_INPUT="$2"
       shift 2
       ;;
     --auto-confirm)
@@ -584,6 +591,41 @@ main() {
   local HIGH_TITLE
   local LOW_TITLE
   local -a CACHE_LATENTS_ARGS=()
+  local noise_mode="$NOISE_MODE_INPUT"
+  local RUN_HIGH=1
+  local RUN_LOW=1
+
+  if [[ -z "${noise_mode:-}" ]]; then
+    if (( AUTO_CONFIRM )); then
+      noise_mode="both"
+      echo "Noise selection (auto default): $noise_mode"
+    else
+      read -r -p "Noise selection (high/low/both, default: both): " noise_mode || true
+    fi
+  else
+    echo "Noise selection (auto): $noise_mode"
+  fi
+  noise_mode=${noise_mode:-both}
+  noise_mode=${noise_mode,,}
+
+  case "$noise_mode" in
+    both)
+      RUN_HIGH=1
+      RUN_LOW=1
+      ;;
+    high)
+      RUN_HIGH=1
+      RUN_LOW=0
+      ;;
+    low)
+      RUN_HIGH=0
+      RUN_LOW=1
+      ;;
+    *)
+      echo "Invalid noise selection: $noise_mode. Use 'high', 'low', or 'both'." >&2
+      exit 1
+      ;;
+  esac
 
   case "$training_mode" in
     t2v)
@@ -741,12 +783,21 @@ main() {
   UPLOAD_CLOUD=$(normalize_yes_no "$UPLOAD_CLOUD")
   SHUTDOWN_INSTANCE=$(normalize_yes_no "$SHUTDOWN_INSTANCE")
   echo "  Dataset: $DATASET"
-  echo "  High title: $HIGH_TITLE"
-  echo "  Low title:  $LOW_TITLE"
+  if (( RUN_HIGH )); then
+    echo "  High title: $HIGH_TITLE"
+  else
+    echo "  High noise: disabled"
+  fi
+  if (( RUN_LOW )); then
+    echo "  Low title:  $LOW_TITLE"
+  else
+    echo "  Low noise:  disabled"
+  fi
   echo "  Author:     $AUTHOR"
   echo "  Save every: $SAVE_EVERY epochs"
   echo "  Task:       $TRAIN_TASK"
   echo "  Mode:       ${training_mode^^}"
+  echo "  Noise mode: ${noise_mode^^}"
   echo "  Upload to cloud: $UPLOAD_CLOUD"
   echo "  Auto-shutdown: $SHUTDOWN_INSTANCE"
   echo ""
@@ -767,8 +818,12 @@ main() {
   require "$ACCELERATE"
   require "$VAE"
   require "$T5"
-  require "$HIGH_DIT"
-  require "$LOW_DIT"
+  if (( RUN_HIGH )); then
+    require "$HIGH_DIT"
+  fi
+  if (( RUN_LOW )); then
+    require "$LOW_DIT"
+  fi
   require "$DATASET"
 
   cd "$MUSUBI_DIR"
@@ -800,107 +855,142 @@ main() {
     --t5 "$T5"
 
   # Allocate distinct rendezvous ports to prevent EADDRINUSE
-  HIGH_PORT=$(get_free_port)
-  LOW_PORT=$(get_free_port)
-  if [[ "$LOW_PORT" == "$HIGH_PORT" ]]; then
+  local HIGH_PORT=""
+  local LOW_PORT=""
+  local HIGH_GPU=""
+  local LOW_GPU=""
+  local HIGH_PID=""
+  local LOW_PID=""
+  local -a WAIT_PIDS=()
+
+  if (( RUN_HIGH )); then
+    HIGH_PORT=$(get_free_port)
+  fi
+  if (( RUN_LOW )); then
     LOW_PORT=$(get_free_port)
+    if (( RUN_HIGH )) && [[ "$LOW_PORT" == "$HIGH_PORT" ]]; then
+      LOW_PORT=$(get_free_port)
+    fi
   fi
 
-  echo "Waiting for a free GPU for HIGH noise training..."
-  HIGH_GPU=$(wait_for_free_gpu)
-  echo "Starting HIGH on GPU $HIGH_GPU (port $HIGH_PORT) -> run_high.log"
-  MASTER_ADDR=127.0.0.1 MASTER_PORT="$HIGH_PORT" CUDA_VISIBLE_DEVICES="$HIGH_GPU" \
-  "$ACCELERATE" launch --num_cpu_threads_per_process "$CPU_THREADS_PER_PROCESS" --num_processes 1 --main_process_port "$HIGH_PORT" src/musubi_tuner/wan_train_network.py \
-    --task "$TRAIN_TASK" \
-    --dit "$HIGH_DIT" \
-    --vae "$VAE" \
-    --t5 "$T5" \
-    --dataset_config "$DATASET" \
-    $ATTN_FLAGS \
-    --mixed_precision fp16 \
-    --fp8_base \
-    --optimizer_type adamw \
-    --learning_rate 3e-4 \
-    --gradient_checkpointing \
-    --gradient_accumulation_steps 1 \
-    --max_data_loader_n_workers "$MAX_DATA_LOADER_WORKERS" \
-    --network_module networks.lora_wan \
-    --network_dim 16 \
-    --network_alpha 16 \
-    --timestep_sampling shift \
-    --discrete_flow_shift 1.0 \
-    --max_train_epochs 100 \
-    --save_every_n_epochs "$SAVE_EVERY" \
-    --seed 5 \
-    --optimizer_args weight_decay=0.1 \
-    --max_grad_norm 0 \
-    --lr_scheduler polynomial \
-    --lr_scheduler_power 8 \
-    --lr_scheduler_min_lr_ratio=5e-5 \
-    --output_dir "$MUSUBI_DIR/output" \
-    --output_name "$HIGH_TITLE" \
-    --metadata_title "$HIGH_TITLE" \
-    --metadata_author "$AUTHOR" \
-    --preserve_distribution_shape \
-    --min_timestep 875 \
-    --max_timestep 1000 \
-    > "$PWD/run_high.log" 2>&1 &
-  HIGH_PID=$!
-
-  # Determine GPU count to decide if LOW can reuse the same GPU (single-GPU sequential case)
-  GPU_COUNT=$(nvidia-smi --query-gpu=index --format=csv,noheader 2>/dev/null | wc -l | tr -d ' ')
-  echo "Waiting for a free GPU for LOW noise training..."
-  if [[ "$GPU_COUNT" -gt 1 ]]; then
-    LOW_GPU=$(wait_for_free_gpu "$HIGH_GPU")
+  if (( RUN_HIGH )); then
+    echo "Waiting for a free GPU for HIGH noise training..."
+    HIGH_GPU=$(wait_for_free_gpu)
+    echo "Starting HIGH on GPU $HIGH_GPU (port $HIGH_PORT) -> run_high.log"
+    MASTER_ADDR=127.0.0.1 MASTER_PORT="$HIGH_PORT" CUDA_VISIBLE_DEVICES="$HIGH_GPU" \
+    "$ACCELERATE" launch --num_cpu_threads_per_process "$CPU_THREADS_PER_PROCESS" --num_processes 1 --main_process_port "$HIGH_PORT" src/musubi_tuner/wan_train_network.py \
+      --task "$TRAIN_TASK" \
+      --dit "$HIGH_DIT" \
+      --vae "$VAE" \
+      --t5 "$T5" \
+      --dataset_config "$DATASET" \
+      $ATTN_FLAGS \
+      --mixed_precision fp16 \
+      --fp8_base \
+      --optimizer_type adamw \
+      --learning_rate 3e-4 \
+      --gradient_checkpointing \
+      --gradient_accumulation_steps 1 \
+      --max_data_loader_n_workers "$MAX_DATA_LOADER_WORKERS" \
+      --network_module networks.lora_wan \
+      --network_dim 16 \
+      --network_alpha 16 \
+      --timestep_sampling shift \
+      --discrete_flow_shift 1.0 \
+      --max_train_epochs 100 \
+      --save_every_n_epochs "$SAVE_EVERY" \
+      --seed 5 \
+      --optimizer_args weight_decay=0.1 \
+      --max_grad_norm 0 \
+      --lr_scheduler polynomial \
+      --lr_scheduler_power 8 \
+      --lr_scheduler_min_lr_ratio=5e-5 \
+      --output_dir "$MUSUBI_DIR/output" \
+      --output_name "$HIGH_TITLE" \
+      --metadata_title "$HIGH_TITLE" \
+      --metadata_author "$AUTHOR" \
+      --preserve_distribution_shape \
+      --min_timestep 875 \
+      --max_timestep 1000 \
+      > "$PWD/run_high.log" 2>&1 &
+    HIGH_PID=$!
+    WAIT_PIDS+=("$HIGH_PID")
   else
-    # Single GPU: allow reuse of the same GPU after it becomes free (sequential)
-    LOW_GPU=$(wait_for_free_gpu)
+    echo "Skipping HIGH noise training per noise selection."
   fi
-  echo "Starting LOW on GPU $LOW_GPU (port $LOW_PORT) -> run_low.log"
-  MASTER_ADDR=127.0.0.1 MASTER_PORT="$LOW_PORT" CUDA_VISIBLE_DEVICES="$LOW_GPU" \
-  "$ACCELERATE" launch --num_cpu_threads_per_process "$CPU_THREADS_PER_PROCESS" --num_processes 1 --main_process_port "$LOW_PORT" src/musubi_tuner/wan_train_network.py \
-    --task "$TRAIN_TASK" \
-    --dit "$LOW_DIT" \
-    --vae "$VAE" \
-    --t5 "$T5" \
-    --dataset_config "$DATASET" \
-    $ATTN_FLAGS \
-    --mixed_precision fp16 \
-    --fp8_base \
-    --optimizer_type adamw \
-    --learning_rate 3e-4 \
-    --gradient_checkpointing \
-    --gradient_accumulation_steps 1 \
-    --max_data_loader_n_workers "$MAX_DATA_LOADER_WORKERS" \
-    --network_module networks.lora_wan \
-    --network_dim 16 \
-    --network_alpha 16 \
-    --timestep_sampling shift \
-    --discrete_flow_shift 1.0 \
-    --max_train_epochs 100 \
-    --save_every_n_epochs "$SAVE_EVERY" \
-    --seed 5 \
-    --optimizer_args weight_decay=0.1 \
-    --max_grad_norm 0 \
-    --lr_scheduler polynomial \
-    --lr_scheduler_power 8 \
-    --lr_scheduler_min_lr_ratio=5e-5 \
-    --output_dir "$MUSUBI_DIR/output" \
-    --output_name "$LOW_TITLE" \
-    --metadata_title "$LOW_TITLE" \
-    --metadata_author "$AUTHOR" \
-    --preserve_distribution_shape \
-    --min_timestep 0 \
-    --max_timestep 875 \
-    > "$PWD/run_low.log" 2>&1 &
-  LOW_PID=$!
 
-  echo "HIGH PID: $HIGH_PID (GPU $HIGH_GPU), log: $PWD/run_high.log"
-  echo "LOW  PID: $LOW_PID (GPU $LOW_GPU), log: $PWD/run_low.log"
+  if (( RUN_LOW )); then
+    local GPU_COUNT
+    GPU_COUNT=$(nvidia-smi --query-gpu=index --format=csv,noheader 2>/dev/null | wc -l | tr -d ' ')
+    echo "Waiting for a free GPU for LOW noise training..."
+    if (( GPU_COUNT > 1 )) && (( RUN_HIGH )); then
+      LOW_GPU=$(wait_for_free_gpu "$HIGH_GPU")
+    else
+      LOW_GPU=$(wait_for_free_gpu)
+    fi
+    echo "Starting LOW on GPU $LOW_GPU (port $LOW_PORT) -> run_low.log"
+    MASTER_ADDR=127.0.0.1 MASTER_PORT="$LOW_PORT" CUDA_VISIBLE_DEVICES="$LOW_GPU" \
+    "$ACCELERATE" launch --num_cpu_threads_per_process "$CPU_THREADS_PER_PROCESS" --num_processes 1 --main_process_port "$LOW_PORT" src/musubi_tuner/wan_train_network.py \
+      --task "$TRAIN_TASK" \
+      --dit "$LOW_DIT" \
+      --vae "$VAE" \
+      --t5 "$T5" \
+      --dataset_config "$DATASET" \
+      $ATTN_FLAGS \
+      --mixed_precision fp16 \
+      --fp8_base \
+      --optimizer_type adamw \
+      --learning_rate 3e-4 \
+      --gradient_checkpointing \
+      --gradient_accumulation_steps 1 \
+      --max_data_loader_n_workers "$MAX_DATA_LOADER_WORKERS" \
+      --network_module networks.lora_wan \
+      --network_dim 16 \
+      --network_alpha 16 \
+      --timestep_sampling shift \
+      --discrete_flow_shift 1.0 \
+      --max_train_epochs 100 \
+      --save_every_n_epochs "$SAVE_EVERY" \
+      --seed 5 \
+      --optimizer_args weight_decay=0.1 \
+      --max_grad_norm 0 \
+      --lr_scheduler polynomial \
+      --lr_scheduler_power 8 \
+      --lr_scheduler_min_lr_ratio=5e-5 \
+      --output_dir "$MUSUBI_DIR/output" \
+      --output_name "$LOW_TITLE" \
+      --metadata_title "$LOW_TITLE" \
+      --metadata_author "$AUTHOR" \
+      --preserve_distribution_shape \
+      --min_timestep 0 \
+      --max_timestep 875 \
+      > "$PWD/run_low.log" 2>&1 &
+    LOW_PID=$!
+    WAIT_PIDS+=("$LOW_PID")
+  else
+    echo "Skipping LOW noise training per noise selection."
+  fi
 
-  echo "Waiting for both trainings to finish..."
-  wait "$HIGH_PID"
-  wait "$LOW_PID"
+  if (( RUN_HIGH )); then
+    echo "HIGH PID: $HIGH_PID${HIGH_GPU:+ (GPU $HIGH_GPU)}, log: $PWD/run_high.log"
+  fi
+  if (( RUN_LOW )); then
+    echo "LOW  PID: $LOW_PID${LOW_GPU:+ (GPU $LOW_GPU)}, log: $PWD/run_low.log"
+  fi
+
+  if (( RUN_HIGH )) && (( RUN_LOW )); then
+    echo "Waiting for both trainings to finish..."
+  elif (( RUN_HIGH )); then
+    echo "Waiting for high noise training to finish..."
+  elif (( RUN_LOW )); then
+    echo "Waiting for low noise training to finish..."
+  fi
+
+  for pid in "${WAIT_PIDS[@]}"; do
+    if [[ -n "$pid" ]]; then
+      wait "$pid"
+    fi
+  done
   echo "✅ Training completed!"
 
   OUTPUT_DIR="$MUSUBI_DIR/output"

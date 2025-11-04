@@ -288,6 +288,7 @@ class TrainRequest(BaseModel):
     shutdown_instance: bool = True
     auto_confirm: bool = True
     training_mode: Literal["t2v", "i2v"] = "t2v"
+    noise_mode: Literal["both", "high", "low"] = "both"
 
 
 class ApiKeyRequest(BaseModel):
@@ -350,8 +351,11 @@ class TrainingState:
         self.stop_event: asyncio.Event = asyncio.Event()
         self.tasks: List[asyncio.Task] = []
         self.stop_requested: bool = False
+        self.active_runs: Set[str] = {"high", "low"}
+        self.noise_mode: str = "both"
 
-    def reset_for_start(self) -> None:
+    def reset_for_start(self, active_runs: Optional[Set[str]] = None) -> None:
+        self.active_runs = set(active_runs or {"high", "low"})
         self.history = {"high": [], "low": []}
         self.current = {"high": None, "low": None}
         self.pending = {
@@ -363,11 +367,14 @@ class TrainingState:
         self.tasks = []
         self.stop_requested = False
 
-    def mark_started(self, process: asyncio.subprocess.Process) -> None:
-        self.reset_for_start()
+    def mark_started(
+        self, process: asyncio.subprocess.Process, active_runs: Set[str], noise_mode: str
+    ) -> None:
+        self.reset_for_start(active_runs)
         self.process = process
         self.status = "running"
         self.running = True
+        self.noise_mode = noise_mode
 
     def mark_finished(self, status: str) -> None:
         self.status = status
@@ -381,6 +388,8 @@ class TrainingState:
         return {
             "status": self.status,
             "running": self.running,
+            "active_runs": sorted(self.active_runs),
+            "noise_mode": self.noise_mode,
             "high": {
                 "history": list(self.history["high"]),
                 "current": dict(self.current["high"]) if self.current["high"] else None,
@@ -1272,6 +1281,7 @@ def build_command(payload: TrainRequest) -> List[str]:
     args.extend(["--upload-cloud", "Y" if payload.upload_cloud else "N"])
     args.extend(["--shutdown-instance", "Y" if payload.shutdown_instance else "N"])
     args.extend(["--mode", payload.training_mode])
+    args.extend(["--noise-mode", payload.noise_mode])
     if payload.auto_confirm:
         args.append("--auto-confirm")
     return args
@@ -1298,6 +1308,14 @@ async def start_training(payload: TrainRequest) -> Dict:
         training_state.append_log(note)
         await event_manager.publish({"type": "log", "line": note})
 
+    noise_mode = payload.noise_mode
+    if noise_mode == "high":
+        active_runs: Set[str] = {"high"}
+    elif noise_mode == "low":
+        active_runs = {"low"}
+    else:
+        active_runs = {"high", "low"}
+
     command = build_command(payload)
     env = os.environ.copy()
     env.setdefault("PYTHONUNBUFFERED", "1")
@@ -1309,17 +1327,31 @@ async def start_training(payload: TrainRequest) -> Dict:
         stderr=asyncio.subprocess.STDOUT,
         env=env,
     )
-    training_state.mark_started(process)
+    training_state.mark_started(process, active_runs, noise_mode)
 
+    disabled_messages = []
+    if "high" not in active_runs:
+        disabled_messages.append("High noise training disabled by configuration.")
+    if "low" not in active_runs:
+        disabled_messages.append("Low noise training disabled by configuration.")
+    for message in disabled_messages:
+        training_state.append_log(message)
+        await event_manager.publish({"type": "log", "line": message})
+
+    await event_manager.publish({"type": "snapshot", **training_state.snapshot()})
     await event_manager.publish({"type": "status", "status": "running", "running": True})
 
     stdout_task = asyncio.create_task(stream_process_output(process))
-    high_task = asyncio.create_task(monitor_log_file(HIGH_LOG, "high"))
-    low_task = asyncio.create_task(monitor_log_file(LOW_LOG, "low"))
-    wait_task = asyncio.create_task(wait_for_completion(process))
     training_state.add_task(stdout_task)
-    training_state.add_task(high_task)
-    training_state.add_task(low_task)
+
+    if "high" in active_runs:
+        high_task = asyncio.create_task(monitor_log_file(HIGH_LOG, "high"))
+        training_state.add_task(high_task)
+    if "low" in active_runs:
+        low_task = asyncio.create_task(monitor_log_file(LOW_LOG, "low"))
+        training_state.add_task(low_task)
+
+    wait_task = asyncio.create_task(wait_for_completion(process))
     training_state.add_task(wait_task)
 
     return {"status": "started"}
