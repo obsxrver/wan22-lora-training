@@ -455,6 +455,11 @@
         background: rgba(255, 255, 255, 0.03);
       }
 
+      .metric-card--disabled {
+        opacity: 0.65;
+        border-style: dashed;
+      }
+
       .status-note {
         font-size: 0.9rem;
         color: var(--muted);
@@ -491,6 +496,13 @@
         margin: 0.2rem 0;
         font-size: 0.95rem;
         color: var(--muted);
+      }
+
+      .metric-status {
+        margin: 0.35rem 0 0.5rem;
+        font-size: 0.85rem;
+        color: var(--muted);
+        min-height: 1.1rem;
       }
 
       canvas {
@@ -599,6 +611,26 @@
               <p class="mode-hint">Choose I2V to train with the image-to-video task and models.</p>
             </fieldset>
           </div>
+          <div class="form-row">
+            <fieldset class="mode-fieldset">
+              <legend>Noise schedule</legend>
+              <div class="mode-options" role="radiogroup" aria-label="Noise schedule">
+                <label class="mode-option">
+                  <input type="radio" name="noiseMode" value="both" checked />
+                  <span>Train high and low noise (recommended)</span>
+                </label>
+                <label class="mode-option">
+                  <input type="radio" name="noiseMode" value="high" />
+                  <span>Train high noise only</span>
+                </label>
+                <label class="mode-option">
+                  <input type="radio" name="noiseMode" value="low" />
+                  <span>Train low noise only</span>
+                </label>
+              </div>
+              <p class="mode-hint">Limit training to a single noise model if you want to save time or VRAM.</p>
+            </fieldset>
+          </div>
           <div class="form-row two-col">
             <label>
               Save every N epochs
@@ -647,8 +679,9 @@
       <section>
         <h2>3. Live progress</h2>
         <div class="metrics">
-          <div class="metric-card">
+          <div class="metric-card" id="highMetrics">
             <h3>High noise</h3>
+            <p class="metric-status" id="highStatus" aria-live="polite"></p>
             <p>Current step: <span id="highStep">-</span></p>
             <p>Current loss: <span id="highLoss">-</span></p>
             <p>Epoch: <span id="highEpoch">-</span></p>
@@ -656,8 +689,9 @@
             <p>Time elapsed: <span id="highElapsed">-</span></p>
             <p>Time remaining: <span id="highEta">-</span></p>
           </div>
-          <div class="metric-card">
+          <div class="metric-card" id="lowMetrics">
             <h3>Low noise</h3>
+            <p class="metric-status" id="lowStatus" aria-live="polite"></p>
             <p>Current step: <span id="lowStep">-</span></p>
             <p>Current loss: <span id="lowLoss">-</span></p>
             <p>Epoch: <span id="lowEpoch">-</span></p>
@@ -696,12 +730,16 @@
       const highTotalStepsEl = document.getElementById('highTotalSteps');
       const highElapsedEl = document.getElementById('highElapsed');
       const highEtaEl = document.getElementById('highEta');
+      const highStatusEl = document.getElementById('highStatus');
+      const highCardEl = document.getElementById('highMetrics');
       const lowStepEl = document.getElementById('lowStep');
       const lowLossEl = document.getElementById('lowLoss');
       const lowEpochEl = document.getElementById('lowEpoch');
       const lowTotalStepsEl = document.getElementById('lowTotalSteps');
       const lowElapsedEl = document.getElementById('lowElapsed');
       const lowEtaEl = document.getElementById('lowEta');
+      const lowStatusEl = document.getElementById('lowStatus');
+      const lowCardEl = document.getElementById('lowMetrics');
       const stopButton = document.getElementById('stopButton');
       const logOutput = document.getElementById('logOutput');
       const uploadCloudCheckbox = form.querySelector('input[name="uploadCloud"]');
@@ -1042,6 +1080,8 @@
           total: highTotalStepsEl,
           elapsed: highElapsedEl,
           eta: highEtaEl,
+          status: highStatusEl,
+          card: highCardEl,
         },
         low: {
           step: lowStepEl,
@@ -1050,8 +1090,77 @@
           total: lowTotalStepsEl,
           elapsed: lowElapsedEl,
           eta: lowEtaEl,
+          status: lowStatusEl,
+          card: lowCardEl,
         },
       };
+      const noiseModeInputs = form.querySelectorAll('input[name="noiseMode"]');
+
+      let chart;
+      let activeRuns = new Set(['high', 'low']);
+
+      function setRunState(run, isActive, message = '') {
+        const display = runDisplays[run];
+        if (!display) {
+          return;
+        }
+        if (display.card) {
+          if (isActive) {
+            display.card.classList.remove('metric-card--disabled');
+            display.card.removeAttribute('aria-disabled');
+          } else {
+            display.card.classList.add('metric-card--disabled');
+            display.card.setAttribute('aria-disabled', 'true');
+          }
+        }
+        if (display.status) {
+          display.status.textContent = message || '';
+          display.status.style.display = message ? 'block' : 'none';
+        }
+      }
+
+      function updateActiveRuns(runs) {
+        const normalized = Array.isArray(runs)
+          ? runs
+              .map((run) => {
+                if (run === 'high' || run === 'low') {
+                  return run;
+                }
+                return null;
+              })
+              .filter(Boolean)
+          : [];
+        if (!normalized.length) {
+          normalized.push('high', 'low');
+        }
+        activeRuns = new Set(normalized);
+        ['high', 'low'].forEach((run) => {
+          const isActive = activeRuns.has(run);
+          const statusText = isActive ? '' : 'Disabled in configuration.';
+          setRunState(run, isActive, statusText);
+        });
+        if (chart && chart.data && Array.isArray(chart.data.datasets)) {
+          const datasets = chart.data.datasets;
+          if (datasets[0]) {
+            datasets[0].hidden = !activeRuns.has('high');
+          }
+          if (datasets[1]) {
+            datasets[1].hidden = !activeRuns.has('low');
+          }
+          chart.update('none');
+        }
+      }
+
+      noiseModeInputs.forEach((input) => {
+        input.addEventListener('change', () => {
+          if (startButton.disabled) {
+            return;
+          }
+          const value = (input.value || '').toLowerCase();
+          const runs = value === 'high' ? ['high'] : value === 'low' ? ['low'] : ['high', 'low'];
+          updateActiveRuns(runs);
+        });
+      });
 
       refreshCloudStatus();
 
@@ -1082,7 +1191,6 @@
         display.eta.textContent = remainingValue;
       }
 
-      let chart;
       function initChart() {
         const ctx = document.getElementById('lossChart').getContext('2d');
         chart = new Chart(ctx, {
@@ -1163,6 +1271,7 @@
       }
 
       initChart();
+      updateActiveRuns([...activeRuns]);
 
       refreshDatasetPreview();
 
@@ -1173,6 +1282,10 @@
         chart.update('none');
         updateRunDisplay('high', null);
         updateRunDisplay('low', null);
+        ['high', 'low'].forEach((run) => {
+          const isActive = activeRuns.has(run);
+          setRunState(run, isActive, isActive ? '' : 'Disabled in configuration.');
+        });
         logLines.length = 0;
         logOutput.textContent = 'Waiting for training output…';
         stopButton.disabled = true;
@@ -1316,6 +1429,13 @@
         setStatus(snapshot.status ? snapshot.status.charAt(0).toUpperCase() + snapshot.status.slice(1) : 'Idle');
         startButton.disabled = !!snapshot.running;
         stopButton.disabled = !snapshot.running;
+        if (snapshot.noise_mode) {
+          const noiseInput = form.querySelector(`input[name="noiseMode"][value="${snapshot.noise_mode}"]`);
+          if (noiseInput) {
+            noiseInput.checked = true;
+          }
+        }
+        updateActiveRuns(Array.isArray(snapshot.active_runs) ? snapshot.active_runs : ['high', 'low']);
         applyHistory(0, snapshot.high?.history || []);
         applyHistory(1, snapshot.low?.history || []);
         updateRunDisplay('high', snapshot.high?.current || null);
@@ -1336,6 +1456,9 @@
         const formData = new FormData(form);
         const trainingModeRaw = (formData.get('trainingMode') || 't2v').toString().toLowerCase();
         const trainingMode = trainingModeRaw === 'i2v' ? 'i2v' : 't2v';
+        const noiseModeRaw = (formData.get('noiseMode') || 'both').toString().toLowerCase();
+        const noiseMode = noiseModeRaw === 'high' || noiseModeRaw === 'low' ? noiseModeRaw : 'both';
+        const selectedRuns = noiseMode === 'high' ? ['high'] : noiseMode === 'low' ? ['low'] : ['high', 'low'];
         const payload = {
           title_suffix: (formData.get('titleSuffix') || '').toString().trim() || 'mylora',
           author: (formData.get('author') || '').toString().trim() || 'authorName',
@@ -1347,6 +1470,7 @@
           shutdown_instance: formData.get('shutdownInstance') === 'on',
           auto_confirm: true,
           training_mode: trainingMode,
+          noise_mode: noiseMode,
         };
 
         if (currentCloudStatus && !currentCloudStatus.can_upload) {
@@ -1372,6 +1496,7 @@
             const error = await response.json().catch(() => ({}));
             throw new Error(error.detail || 'Failed to start training');
           }
+          updateActiveRuns(selectedRuns);
           setMessage('Training started. Watching logs…');
           stopButton.disabled = false;
         } catch (error) {
