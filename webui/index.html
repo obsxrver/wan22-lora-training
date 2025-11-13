@@ -655,6 +655,12 @@
               Shut down instance after training
             </label>
           </div>
+          <div class="form-row">
+            <label class="toggle">
+              <input type="checkbox" name="convertVideos" />
+              Convert dataset videos to 16 FPS before training
+            </label>
+          </div>
           <div id="cloudStatusMessage" class="status-note" aria-live="polite"></div>
           <div class="form-row">
             <label>
@@ -1468,6 +1474,7 @@
           max_data_loader_workers: formData.get('maxWorkers') ? Number(formData.get('maxWorkers')) : null,
           upload_cloud: formData.get('uploadCloud') === 'on',
           shutdown_instance: formData.get('shutdownInstance') === 'on',
+          convert_videos_to_16fps: formData.get('convertVideos') === 'on',
           auto_confirm: true,
           training_mode: trainingMode,
           noise_mode: noiseMode,

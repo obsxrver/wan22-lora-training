@@ -5,11 +5,12 @@ import os
 import re
 import secrets
 import shutil
+import signal
 import subprocess
 import tempfile
 from collections import deque
 from pathlib import Path
-from typing import Any, Dict, FrozenSet, List, Optional, Set
+from typing import Any, Dict, FrozenSet, Iterable, List, Optional, Set, Tuple
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
@@ -17,8 +18,13 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ValidationError
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
-from typing import Literal
+from typing import Awaitable, Callable, Literal
 from urllib.parse import quote
+
+try:
+    import tomllib  # type: ignore[attr-defined]
+except ModuleNotFoundError:  # pragma: no cover - fallback for Python < 3.11
+    import tomli as tomllib  # type: ignore[no-redef]
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RUN_SCRIPT = REPO_ROOT / "run_wan_training.sh"
@@ -275,6 +281,211 @@ async def gather_cloud_status() -> Dict[str, Any]:
     }
 
 
+class VideoConversionError(Exception):
+    """Raised when automatic video conversion cannot be completed."""
+
+
+def _relative_to_any(path: Path, bases: Iterable[Path]) -> str:
+    for base in bases:
+        try:
+            return path.relative_to(base).as_posix()
+        except ValueError:
+            continue
+    return path.name
+
+
+def _should_skip_path(path: Path) -> bool:
+    return any(part in PROTECTED_DATASET_DIRS for part in path.parts)
+
+
+def _load_video_directories(config_path: Path) -> Set[Path]:
+    try:
+        with config_path.open("rb") as handle:
+            config = tomllib.load(handle)
+    except FileNotFoundError as exc:
+        raise VideoConversionError(f"Dataset config '{config_path}' not found.") from exc
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        raise VideoConversionError(f"Failed to read dataset config '{config_path}': {exc}") from exc
+
+    directories: Set[Path] = set()
+    datasets = config.get("datasets")
+    if isinstance(datasets, list):
+        for entry in datasets:
+            if not isinstance(entry, dict):
+                continue
+            video_dir = entry.get("video_directory")
+            if isinstance(video_dir, str) and video_dir.strip():
+                directories.add(Path(video_dir).expanduser())
+
+    if not directories:
+        parent = config_path.parent
+        if parent.exists() and parent.is_dir():
+            directories.add(parent)
+
+    resolved: Set[Path] = set()
+    missing: List[str] = []
+    for directory in directories:
+        resolved_dir = directory.resolve()
+        if resolved_dir.exists() and resolved_dir.is_dir():
+            resolved.add(resolved_dir)
+        else:
+            missing.append(str(directory))
+
+    if missing and not resolved:
+        raise VideoConversionError(
+            "No valid video directories were found. Checked: " + ", ".join(missing)
+        )
+
+    return resolved
+
+
+async def _probe_video_fps(path: Path, ffprobe_path: str) -> Optional[float]:
+    process = await asyncio.create_subprocess_exec(
+        ffprobe_path,
+        "-v",
+        "error",
+        "-select_streams",
+        "v:0",
+        "-show_entries",
+        "stream=avg_frame_rate",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+        str(path),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await process.communicate()
+    if process.returncode != 0:
+        message = stderr.decode("utf-8", "ignore").strip() or stdout.decode("utf-8", "ignore").strip()
+        raise VideoConversionError(
+            f"Failed to inspect '{path.name}' with ffprobe: {message or 'Unknown error.'}"
+        )
+
+    rate_text = stdout.decode("utf-8", "ignore").strip()
+    if not rate_text or rate_text == "0/0":
+        return None
+    if "/" in rate_text:
+        numerator, denominator = rate_text.split("/", 1)
+        try:
+            num = float(numerator)
+            den = float(denominator)
+        except ValueError:
+            return None
+        if den == 0:
+            return None
+        return num / den
+    try:
+        return float(rate_text)
+    except ValueError:
+        return None
+
+
+async def convert_videos_to_target_fps(
+    config_path: Path,
+    target_fps: int,
+    log_callback: Callable[[str], Awaitable[None]],
+) -> Tuple[List[str], int]:
+    ffmpeg_path = shutil.which("ffmpeg")
+    ffprobe_path = shutil.which("ffprobe")
+    if not ffmpeg_path or not ffprobe_path:
+        missing = []
+        if not ffmpeg_path:
+            missing.append("ffmpeg")
+        if not ffprobe_path:
+            missing.append("ffprobe")
+        tools = " and ".join(missing)
+        raise VideoConversionError(f"Required tool(s) {tools} not found in PATH.")
+
+    directories = _load_video_directories(config_path)
+    if not directories:
+        await log_callback("No video directories available for conversion. Skipping 16 FPS step.")
+        return ([], 0)
+
+    video_files: Set[Path] = set()
+    for directory in directories:
+        try:
+            for file_path in directory.rglob("*"):
+                if not file_path.is_file():
+                    continue
+                if file_path.suffix.lower() not in VIDEO_EXTENSIONS:
+                    continue
+                if _should_skip_path(file_path):
+                    continue
+                video_files.add(file_path.resolve())
+        except OSError as exc:
+            await log_callback(f"Failed to scan directory '{directory}': {exc}")
+
+    if not video_files:
+        await log_callback("No video files found for 16 FPS conversion. Skipping step.")
+        return ([], 0)
+
+    needs_conversion: List[Tuple[Path, Optional[float]]] = []
+    already_matching = 0
+    for path in sorted(video_files):
+        fps = await _probe_video_fps(path, ffprobe_path)
+        if fps is not None and abs(fps - target_fps) <= 0.05:
+            already_matching += 1
+            continue
+        needs_conversion.append((path, fps))
+
+    if not needs_conversion:
+        await log_callback("All dataset videos already at 16 FPS. No conversion needed.")
+        return ([], already_matching)
+
+    if already_matching:
+        await log_callback(f"Skipping {already_matching} video(s) already at {target_fps} FPS.")
+
+    total = len(needs_conversion)
+    await log_callback(f"Converting {total} video(s) to {target_fps} FPS before starting training…")
+
+    completed: List[str] = []
+    for index, (video_path, fps) in enumerate(needs_conversion, start=1):
+        display_name = _relative_to_any(video_path, directories)
+        if fps is None:
+            await log_callback(f"[{index}/{total}] Converting {display_name} to {target_fps} FPS…")
+        else:
+            await log_callback(
+                f"[{index}/{total}] Converting {display_name} from {fps:.2f} FPS to {target_fps} FPS…"
+            )
+
+        temp_file = Path(
+            tempfile.NamedTemporaryFile(
+                delete=False, suffix=video_path.suffix, dir=str(video_path.parent)
+            ).name
+        )
+        try:
+            process = await asyncio.create_subprocess_exec(
+                ffmpeg_path,
+                "-y",
+                "-loglevel",
+                "error",
+                "-i",
+                str(video_path),
+                "-vf",
+                f"fps={target_fps}",
+                str(temp_file),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await process.communicate()
+            if process.returncode != 0:
+                error_text = stderr.decode("utf-8", "ignore").strip() or "Unknown ffmpeg error."
+                raise VideoConversionError(
+                    f"Failed to convert '{video_path.name}' to {target_fps} FPS: {error_text}"
+                )
+            os.replace(temp_file, video_path)
+            completed.append(display_name)
+        finally:
+            if temp_file.exists():
+                try:
+                    temp_file.unlink()
+                except OSError:
+                    pass
+
+    await log_callback(f"Finished converting {len(completed)} video(s) to {target_fps} FPS.")
+    return (completed, already_matching)
+
+
 maybe_set_container_api_key()
 
 class TrainRequest(BaseModel):
@@ -289,6 +500,7 @@ class TrainRequest(BaseModel):
     auto_confirm: bool = True
     training_mode: Literal["t2v", "i2v"] = "t2v"
     noise_mode: Literal["both", "high", "low"] = "both"
+    convert_videos_to_16fps: bool = False
 
 
 class ApiKeyRequest(BaseModel):
@@ -1300,6 +1512,21 @@ async def start_training(payload: TrainRequest) -> Dict:
         except FileNotFoundError:
             pass
 
+    dataset_config_path = Path(payload.dataset_path).expanduser()
+    conversion_logs: List[str] = []
+
+    if payload.convert_videos_to_16fps:
+        async def conversion_logger(message: str) -> None:
+            conversion_logs.append(message)
+            await event_manager.publish({"type": "log", "line": message})
+
+        try:
+            await convert_videos_to_target_fps(dataset_config_path, 16, conversion_logger)
+        except VideoConversionError as exc:
+            error_message = f"Video conversion failed: {exc}"
+            await event_manager.publish({"type": "log", "line": error_message})
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
     cloud_status = await gather_cloud_status()
     if payload.upload_cloud and not cloud_status.get("can_upload", False):
         payload.upload_cloud = False
@@ -1326,8 +1553,12 @@ async def start_training(payload: TrainRequest) -> Dict:
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
         env=env,
+        start_new_session=True,
     )
     training_state.mark_started(process, active_runs, noise_mode)
+
+    for line in conversion_logs:
+        training_state.append_log(line)
 
     disabled_messages = []
     if "high" not in active_runs:
@@ -1370,17 +1601,38 @@ async def stop_training() -> Dict:
     await event_manager.publish({"type": "status", "status": "stopping", "running": True})
 
     try:
-        process.terminate()
-    except ProcessLookupError:
-        pass
+        if process.pid is not None:
+            os.killpg(process.pid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError, OSError):
+        try:
+            process.terminate()
+        except ProcessLookupError:
+            pass
+    else:
+        try:
+            process.terminate()
+        except ProcessLookupError:
+            pass
 
     try:
         await asyncio.wait_for(process.wait(), timeout=15)
     except asyncio.TimeoutError:
+        warning = "Training process did not exit after SIGTERM. Sending SIGKILL…"
+        training_state.append_log(warning)
+        await event_manager.publish({"type": "log", "line": warning})
         try:
-            process.kill()
-        except ProcessLookupError:
-            pass
+            if process.pid is not None:
+                os.killpg(process.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, OSError):
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+        else:
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
 
     return {"status": "stopping"}
 
