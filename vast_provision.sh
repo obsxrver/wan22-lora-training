@@ -89,7 +89,7 @@ fi
   pip install fastapi "uvicorn[standard]" python-multipart
   pip install tomli
   pip uninstall xformers
-  pip install torch==2.7.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+  pip install torch torchvision
 ) & pids+=($!)
 
 # Task 2: Download all four models concurrently
