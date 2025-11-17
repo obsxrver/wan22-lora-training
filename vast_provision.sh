@@ -87,6 +87,8 @@ fi
   pip install six
   pip install matplotlib
   pip install fastapi "uvicorn[standard]" python-multipart
+  pip install tomli
+  pip uninstall xformers
   pip install torch torchvision
 ) & pids+=($!)
 
