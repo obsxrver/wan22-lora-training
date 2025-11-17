@@ -277,6 +277,12 @@
         gap: 0.45rem;
       }
 
+      .dataset-card-caption-wrapper {
+        display: flex;
+        flex-direction: column;
+        gap: 0.4rem;
+      }
+
       .dataset-card-title {
         margin: 0;
         font-weight: 600;
@@ -301,6 +307,28 @@
 
       .dataset-card-caption--empty {
         font-style: italic;
+      }
+
+      .dataset-card-caption-editor {
+        display: none;
+        width: 100%;
+        min-height: 80px;
+        padding: 0.5rem 0.65rem;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: rgba(0, 0, 0, 0.45);
+        color: var(--text);
+        font-family: inherit;
+        font-size: 0.85rem;
+        resize: vertical;
+      }
+
+      .dataset-card--editing .dataset-card-caption {
+        display: none;
+      }
+
+      .dataset-card--editing .dataset-card-caption-editor {
+        display: block;
       }
 
       form {
@@ -755,6 +783,7 @@
       const apiKeyButton = document.getElementById('saveApiKeyButton');
       const apiKeyMessageEl = document.getElementById('apiKeyMessage');
       let currentCloudStatus = null;
+      const NO_CAPTION_TEXT = 'No caption file found for this media.';
 
       const MAX_LOG_LINES = 400;
       const logLines = [];
@@ -767,6 +796,96 @@
         datasetMessage.textContent = text;
         datasetMessage.style.display = text ? 'block' : 'none';
         datasetMessage.style.color = isError ? '#ff8a80' : 'var(--muted)';
+      }
+
+      function startCaptionEditing(card, editButton, captionEditor) {
+        if (!card || !editButton || !captionEditor) {
+          return;
+        }
+        card.classList.add('dataset-card--editing');
+        editButton.textContent = 'Save';
+        captionEditor.focus();
+        const length = captionEditor.value.length;
+        captionEditor.setSelectionRange(length, length);
+      }
+
+      async function saveCaptionEdit(options) {
+        const { card, editButton, captionElement, captionEditor } = options || {};
+        if (!card || !editButton || !captionElement || !captionEditor) {
+          return;
+        }
+        const mediaPath = card.dataset?.mediaPath;
+        if (!mediaPath) {
+          return;
+        }
+        const payload = {
+          media_path: mediaPath,
+          caption_text: captionEditor.value,
+        };
+        const captionPath = card.dataset?.captionPath;
+        if (captionPath) {
+          payload.caption_path = captionPath;
+        }
+        editButton.disabled = true;
+        editButton.textContent = 'Saving…';
+        try {
+          const response = await fetch('/dataset/caption', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          let result = {};
+          try {
+            result = await response.json();
+          } catch (error) {
+            result = {};
+          }
+          if (!response.ok) {
+            const detail = result?.detail || result?.message || 'Failed to update caption.';
+            throw new Error(detail);
+          }
+          const newCaption = result?.caption_text ?? '';
+          const newCaptionPath = result?.caption_path ?? '';
+          if (newCaptionPath) {
+            card.dataset.captionPath = newCaptionPath;
+          } else {
+            delete card.dataset.captionPath;
+          }
+          const body = card.querySelector('.dataset-card-body');
+          let captionMeta = card.querySelector('.dataset-card-meta');
+          if (newCaptionPath) {
+            if (!captionMeta && body) {
+              captionMeta = document.createElement('p');
+              captionMeta.className = 'dataset-card-meta';
+              const captionWrapper = body.querySelector('.dataset-card-caption-wrapper');
+              if (captionWrapper) {
+                body.insertBefore(captionMeta, captionWrapper);
+              } else {
+                body.appendChild(captionMeta);
+              }
+            }
+            if (captionMeta) {
+              captionMeta.textContent = `Caption: ${newCaptionPath}`;
+            }
+          } else if (captionMeta) {
+            captionMeta.remove();
+          }
+          captionEditor.value = newCaption;
+          if (newCaption) {
+            captionElement.textContent = newCaption;
+            captionElement.classList.remove('dataset-card-caption--empty');
+          } else {
+            captionElement.textContent = NO_CAPTION_TEXT;
+            captionElement.classList.add('dataset-card-caption--empty');
+          }
+          card.classList.remove('dataset-card--editing');
+          setDatasetMessage(result?.message || 'Caption updated.');
+        } catch (error) {
+          setDatasetMessage(error?.message || 'Failed to update caption.', true);
+        } finally {
+          editButton.disabled = false;
+          editButton.textContent = card.classList.contains('dataset-card--editing') ? 'Save' : 'Edit';
+        }
       }
 
       async function handleDatasetItemRemoval(mediaPath, card, button) {
@@ -823,6 +942,14 @@
         card.setAttribute('role', 'listitem');
 
         const mediaPath = item?.media_path || item?.image_path || item?.video_path || '';
+        card.dataset.mediaPath = mediaPath;
+        if (item?.caption_path) {
+          card.dataset.captionPath = item.caption_path;
+        }
+
+        let captionElement;
+        let captionEditor;
+
         const mediaUrl = item?.media_url || item?.image_url || item?.video_url || '';
         const isVideo =
           item?.media_kind === 'video' ||
@@ -874,6 +1001,25 @@
         if (mediaPath) {
           const actions = document.createElement('div');
           actions.className = 'dataset-card-actions';
+
+          const editButton = document.createElement('button');
+          editButton.type = 'button';
+          editButton.className = 'dataset-card-edit';
+          editButton.textContent = 'Edit';
+          editButton.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (!captionElement || !captionEditor) {
+              return;
+            }
+            if (card.classList.contains('dataset-card--editing')) {
+              saveCaptionEdit({ card, editButton, captionElement, captionEditor });
+            } else {
+              startCaptionEditing(card, editButton, captionEditor);
+            }
+          });
+          actions.appendChild(editButton);
+
           const removeButton = document.createElement('button');
           removeButton.type = 'button';
           removeButton.className = 'dataset-card-remove';
@@ -884,6 +1030,7 @@
             handleDatasetItemRemoval(mediaPath, card, removeButton);
           });
           actions.appendChild(removeButton);
+
           card.appendChild(actions);
         }
 
@@ -902,15 +1049,29 @@
           body.appendChild(captionMeta);
         }
 
-        const caption = document.createElement('p');
-        caption.className = 'dataset-card-caption';
+        const captionWrapper = document.createElement('div');
+        captionWrapper.className = 'dataset-card-caption-wrapper';
+
+        captionElement = document.createElement('p');
+        captionElement.className = 'dataset-card-caption';
         if (item?.caption_text) {
-          caption.textContent = item.caption_text;
+          captionElement.textContent = item.caption_text;
         } else {
-          caption.textContent = 'No caption file found for this media.';
-          caption.classList.add('dataset-card-caption--empty');
+          captionElement.textContent = NO_CAPTION_TEXT;
+          captionElement.classList.add('dataset-card-caption--empty');
         }
-        body.appendChild(caption);
+
+        captionEditor = document.createElement('textarea');
+        captionEditor.className = 'dataset-card-caption-editor';
+        captionEditor.value = item?.caption_text || '';
+        captionEditor.rows = Math.min(8, Math.max(3, captionEditor.value.split(/\n/).length || 3));
+        captionEditor.placeholder = 'Enter caption text…';
+        captionEditor.spellcheck = false;
+        captionEditor.setAttribute('aria-label', `Edit caption for ${mediaPath || 'this media item'}`);
+
+        captionWrapper.appendChild(captionElement);
+        captionWrapper.appendChild(captionEditor);
+        body.appendChild(captionWrapper);
 
         card.appendChild(body);
         return card;
