@@ -798,6 +798,64 @@
         datasetMessage.style.color = isError ? '#ff8a80' : 'var(--muted)';
       }
 
+      async function loadFullCaption(options = {}) {
+        const { card, captionElement, captionEditor, editButton } = options || {};
+        if (!card || !captionEditor) {
+          return false;
+        }
+        if (card.dataset?.captionLoaded === 'true') {
+          return true;
+        }
+        const captionPath = card.dataset?.captionPath;
+        if (!captionPath) {
+          card.dataset.captionLoaded = 'true';
+          return true;
+        }
+
+        const params = new URLSearchParams({ caption_path: captionPath });
+        const originalLabel = editButton ? editButton.textContent : null;
+        if (editButton) {
+          editButton.disabled = true;
+          editButton.textContent = 'Loading…';
+        }
+
+        try {
+          const response = await fetch(`/dataset/caption?${params.toString()}`);
+          if (!response.ok) {
+            throw new Error('Failed to load caption text.');
+          }
+          const data = await response.json();
+          const captionText = data?.caption_text ?? '';
+          const captionPathResponse = data?.caption_path || '';
+          captionEditor.value = captionText;
+          captionEditor.rows = Math.min(8, Math.max(3, captionText.split(/\n/).length || 3));
+          if (captionElement) {
+            if (captionText) {
+              captionElement.textContent = captionText;
+              captionElement.classList.remove('dataset-card-caption--empty');
+            } else {
+              captionElement.textContent = NO_CAPTION_TEXT;
+              captionElement.classList.add('dataset-card-caption--empty');
+            }
+          }
+          if (captionPathResponse) {
+            card.dataset.captionPath = captionPathResponse;
+          } else {
+            delete card.dataset.captionPath;
+          }
+          card.dataset.captionLoaded = 'true';
+          return true;
+        } catch (error) {
+          setDatasetMessage(error?.message || 'Failed to load caption text.', true);
+          throw error;
+        } finally {
+          if (editButton) {
+            editButton.disabled = false;
+            editButton.textContent = originalLabel ?? 'Edit';
+          }
+        }
+      }
+
       function startCaptionEditing(card, editButton, captionEditor) {
         if (!card || !editButton || !captionEditor) {
           return;
@@ -878,6 +936,7 @@
             captionElement.textContent = NO_CAPTION_TEXT;
             captionElement.classList.add('dataset-card-caption--empty');
           }
+          card.dataset.captionLoaded = 'true';
           card.classList.remove('dataset-card--editing');
           setDatasetMessage(result?.message || 'Caption updated.');
         } catch (error) {
@@ -1006,15 +1065,20 @@
           editButton.type = 'button';
           editButton.className = 'dataset-card-edit';
           editButton.textContent = 'Edit';
-          editButton.addEventListener('click', (event) => {
+          editButton.addEventListener('click', async (event) => {
             event.preventDefault();
             event.stopPropagation();
             if (!captionElement || !captionEditor) {
               return;
             }
             if (card.classList.contains('dataset-card--editing')) {
-              saveCaptionEdit({ card, editButton, captionElement, captionEditor });
+              await saveCaptionEdit({ card, editButton, captionElement, captionEditor });
             } else {
+              try {
+                await loadFullCaption({ card, captionElement, captionEditor, editButton });
+              } catch (error) {
+                return;
+              }
               startCaptionEditing(card, editButton, captionEditor);
             }
           });

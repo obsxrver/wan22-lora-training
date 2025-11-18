@@ -1255,6 +1255,40 @@ async def dataset_files() -> Dict[str, Any]:
     return {"items": items, "total": len(items)}
 
 
+@app.get("/dataset/caption")
+async def dataset_get_caption(caption_path: Optional[str] = None, media_path: Optional[str] = None) -> Dict[str, Any]:
+    if caption_path:
+        relative_caption = caption_path.strip()
+        if not relative_caption:
+            raise HTTPException(status_code=400, detail="caption_path is required")
+        caption_file = _resolve_dataset_relative_path(relative_caption)
+        if not caption_file.exists() or not caption_file.is_file():
+            raise HTTPException(status_code=404, detail="Caption file not found")
+    elif media_path:
+        normalized_media = media_path.strip()
+        if not normalized_media:
+            raise HTTPException(status_code=400, detail="media_path is required")
+        media_file = _resolve_dataset_file(normalized_media)
+        caption_file = None
+        for suffix, priority in sorted(CAPTION_PRIORITY.items(), key=lambda item: item[1]):
+            candidate = media_file.with_suffix(suffix)
+            if candidate.exists() and candidate.is_file():
+                caption_file = candidate
+                break
+        if caption_file is None:
+            return {"caption_text": "", "caption_path": None}
+        relative_caption = caption_file.relative_to(DATASET_ROOT).as_posix()
+    else:
+        raise HTTPException(status_code=400, detail="caption_path or media_path is required")
+
+    try:
+        caption_text = caption_file.read_text(encoding="utf-8", errors="replace").strip()
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to read caption: {exc}") from exc
+
+    return {"caption_text": caption_text, "caption_path": relative_caption}
+
+
 @app.post("/dataset/delete")
 async def dataset_delete(payload: DeleteDatasetItem) -> Dict[str, Any]:
     result = _delete_dataset_item(payload.media_path)
