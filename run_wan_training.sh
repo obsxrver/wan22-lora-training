@@ -8,8 +8,8 @@ set -euo pipefail
 # - If 2+ GPUs are free, runs them concurrently; otherwise waits for a free GPU
 
 MUSUBI_DIR="/workspace/musubi-tuner"
-PYTHON="$MUSUBI_DIR/venv/bin/python"
-ACCELERATE="$MUSUBI_DIR/venv/bin/accelerate"
+PYTHON="/venv/main/bin/python"
+ACCELERATE="/venv/main/bin/accelerate" #todo install in provisioning if errors
 
 VAE="$MUSUBI_DIR/models/vae/split_files/vae/wan_2.1_vae.safetensors"
 T5="$MUSUBI_DIR/models/text_encoders/models_t5_umt5-xxl-enc-bf16.pth"

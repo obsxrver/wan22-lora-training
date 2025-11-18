@@ -1,7 +1,7 @@
 #!/bin/bash
 # Provisioning script for Vast.ai to setup musubi-tuner with correct install order and parallel model downloads
 set -euo pipefail
-
+source /venv/main/bin/activate
 # ---------- helpers ----------
 pids=()
 wait_all() {
@@ -42,16 +42,24 @@ chmod +x /workspace/analyze_training_logs.py
 
 # ensure huggingface-cli exists for downloads (system Python, outside venv)
 # Install latest version with system package handling
-python3 -m pip install -U "huggingface_hub>=0.20.0" --break-system-packages || \
-  python3 -m pip install -U huggingface_hub --break-system-packages || \
-  python3 -m pip install -U huggingface_hub
+pip install -U "huggingface_hub>=0.20.0" --break-system-packages || \
+pip install -U huggingface_hub --break-system-packages || \
+pip install -U huggingface_hub
 
 # install vastai CLI for instance management and cloud storage
 # Handle system package conflicts gracefully
-python3 -m pip install -U vastai --break-system-packages || {
-  echo "Warning: vastai installation had conflicts, trying alternative approach..."
-  python3 -m pip install vastai --user --break-system-packages
-}
+# I think that vastai is pre-installed
+#python3 -m pip install -U vastai --break-system-packages || {
+#  echo "Warning: vastai installation had conflicts, trying alternative approach..."
+#  python3 -m pip install vastai --user --break-system-packages
+#}
+#fix the stupid fucking dependency bug.
+/usr/bin/python3 -m pip install rich
+#test if vastai command is available if not install in venv
+if ! command -v vastai >/dev/null 2>&1; then
+  pip install vastai
+fi
+
 
 # Set up vastai API key - prefer VASTAI_KEY, fallback to CONTAINER_API_KEY
 if [[ -n "${VASTAI_KEY:-}" ]]; then
@@ -72,15 +80,11 @@ fi
   cd /workspace/musubi-tuner
 
   sudo apt-get update
-  #sudo apt-get install -y \
-  ##  libcudnn8=8.9.7.29-1+cuda12.2 \
-    #libcudnn8-dev=8.9.7.29-1+cuda12.2 \
-    #--allow-change-held-packages
-  #above should already be installecd on the image. 
-
-  python3 -m venv venv
+  
+  #i dont remember why we used a separate venv when we already had one
+  #python3 -m venv venv
   # shellcheck disable=SC1091
-  source venv/bin/activate
+  #source venv/bin/activate
 
   pip install -e .
   pip install protobuf
@@ -140,7 +144,7 @@ cat <<'EOF' >/workspace/wan22-lora-training/start_wan_webui.sh
 set -euo pipefail
 WEBUI_PORT="${WEBUI_PORT:-7865}"
 cd /workspace/wan22-lora-training
-source /workspace/musubi-tuner/venv/bin/activate
+source /venv/main/bin/activate
 exec uvicorn webui.server:app --host 0.0.0.0 --port "${WEBUI_PORT}"
 EOF
 chmod +x /workspace/wan22-lora-training/start_wan_webui.sh
@@ -178,7 +182,7 @@ export PORTAL_CONFIG="${PORTAL_CONFIG}"
 EOF
 
 if command -v supervisorctl >/dev/null 2>&1; then
-  sudo supervisorctl restart portal || true
+  sudo supervisorctl restart instance_portal || true
 fi
 
 echo "✅ Setup complete."
