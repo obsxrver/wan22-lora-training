@@ -525,6 +525,12 @@ class DeleteDatasetItem(BaseModel):
     media_path: str = Field(min_length=1)
 
 
+class UpdateCaptionRequest(BaseModel):
+    media_path: str = Field(min_length=1)
+    caption_text: Optional[str] = None
+    caption_path: Optional[str] = None
+
+
 class EventManager:
     def __init__(self) -> None:
         self._listeners: List[asyncio.Queue] = []
@@ -849,6 +855,15 @@ def _collect_dataset_items() -> List[Dict[str, Any]]:
 
     items.sort(key=lambda item: item["media_path"].lower())
     return items
+
+
+def _resolve_dataset_relative_path(relative_path: str) -> Path:
+    dataset_root = DATASET_ROOT.resolve()
+    normalized = _normalize_export_path(relative_path)
+    target_path = (dataset_root / normalized).resolve()
+    if dataset_root not in target_path.parents and target_path != dataset_root:
+        raise HTTPException(status_code=400, detail="Invalid dataset path")
+    return target_path
 
 
 def _normalize_export_path(value: str) -> Path:
@@ -1240,10 +1255,88 @@ async def dataset_files() -> Dict[str, Any]:
     return {"items": items, "total": len(items)}
 
 
+@app.get("/dataset/caption")
+async def dataset_get_caption(caption_path: Optional[str] = None, media_path: Optional[str] = None) -> Dict[str, Any]:
+    if caption_path:
+        relative_caption = caption_path.strip()
+        if not relative_caption:
+            raise HTTPException(status_code=400, detail="caption_path is required")
+        caption_file = _resolve_dataset_relative_path(relative_caption)
+        if not caption_file.exists() or not caption_file.is_file():
+            raise HTTPException(status_code=404, detail="Caption file not found")
+    elif media_path:
+        normalized_media = media_path.strip()
+        if not normalized_media:
+            raise HTTPException(status_code=400, detail="media_path is required")
+        media_file = _resolve_dataset_file(normalized_media)
+        caption_file = None
+        for suffix, priority in sorted(CAPTION_PRIORITY.items(), key=lambda item: item[1]):
+            candidate = media_file.with_suffix(suffix)
+            if candidate.exists() and candidate.is_file():
+                caption_file = candidate
+                break
+        if caption_file is None:
+            return {"caption_text": "", "caption_path": None}
+        relative_caption = caption_file.relative_to(DATASET_ROOT).as_posix()
+    else:
+        raise HTTPException(status_code=400, detail="caption_path or media_path is required")
+
+    try:
+        caption_text = caption_file.read_text(encoding="utf-8", errors="replace").strip()
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to read caption: {exc}") from exc
+
+    return {"caption_text": caption_text, "caption_path": relative_caption}
+
+
 @app.post("/dataset/delete")
 async def dataset_delete(payload: DeleteDatasetItem) -> Dict[str, Any]:
     result = _delete_dataset_item(payload.media_path)
     return result
+
+
+@app.post("/dataset/caption")
+async def dataset_update_caption(payload: UpdateCaptionRequest) -> Dict[str, Any]:
+    media_path = payload.media_path.strip()
+    if not media_path:
+        raise HTTPException(status_code=400, detail="media_path is required")
+
+    media_file = _resolve_dataset_file(media_path)
+    caption_text_raw = payload.caption_text or ""
+    caption_text = caption_text_raw.replace("\r\n", "\n").replace("\r", "\n").strip()
+
+    if payload.caption_path:
+        relative_caption = payload.caption_path.strip()
+        if not relative_caption:
+            raise HTTPException(status_code=400, detail="caption_path is invalid")
+        suffix = Path(relative_caption).suffix.lower()
+        if suffix not in CAPTION_EXTENSIONS:
+            raise HTTPException(status_code=400, detail="Caption file must use a supported extension")
+        caption_file = _resolve_dataset_relative_path(relative_caption)
+    else:
+        caption_file = media_file.with_suffix(".txt")
+        relative_caption = caption_file.relative_to(DATASET_ROOT).as_posix()
+
+    caption_file.parent.mkdir(parents=True, exist_ok=True)
+
+    if not caption_text:
+        if caption_file.exists():
+            try:
+                caption_file.unlink()
+            except OSError as exc:
+                raise HTTPException(status_code=500, detail=f"Failed to delete caption file: {exc}") from exc
+            message = f"Caption removed for '{media_path}'."
+        else:
+            message = f"No caption text provided for '{media_path}'."
+        return {"message": message, "caption_text": "", "caption_path": None}
+
+    try:
+        caption_file.write_text(caption_text, encoding="utf-8")
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to save caption: {exc}") from exc
+
+    message = f"Caption updated for '{media_path}'."
+    return {"message": message, "caption_text": caption_text, "caption_path": relative_caption}
 
 
 def _iter_file_chunks(file_path: Path, start: int = 0, end: Optional[int] = None, chunk_size: int = 1024 * 1024):
