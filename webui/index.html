@@ -642,10 +642,6 @@
               <legend>Noise schedule</legend>
               <div class="mode-options" role="radiogroup" aria-label="Noise schedule">
                 <label class="mode-option">
-                  <input type="radio" name="noiseMode" value="both" checked />
-                  <span>High Noise & Low Noise (Recommended)</span>
-                </label>
-                <label class="mode-option">
                   <input type="radio" name="noiseMode" value="high" />
                   <span>High Noise Only</span>
                 </label>
@@ -653,8 +649,12 @@
                   <input type="radio" name="noiseMode" value="low" />
                   <span>Low Noise Only</span>
                 </label>
+                <label class="mode-option">
+                  <input type="radio" name="noiseMode" value="both" checked />
+                  <span>Both (Recommended)</span>
+                </label>
               </div>
-              <p class="mode-hint">If your instance has more than 1 GPU, you can train high noise and low noise simultaneously.</p>
+              <p class="mode-hint">If your instance has 2 GPUs, I can train high noise and low noise simultaneously.</p>
             </fieldset>
           </div>
           <div class="form-row two-col">
