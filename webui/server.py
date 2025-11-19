@@ -14,12 +14,10 @@ from typing import Any, Dict, FrozenSet, Iterable, List, Optional, Set, Tuple
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ValidationError
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 from typing import Awaitable, Callable, Literal
-from urllib.parse import quote
 
 try:
     import tomllib  # type: ignore[attr-defined]
@@ -33,16 +31,10 @@ DATASET_ROOT = Path("/workspace/musubi-tuner/dataset")
 LOG_DIR = Path("/workspace/musubi-tuner")
 HIGH_LOG = LOG_DIR / "run_high.log"
 LOW_LOG = LOG_DIR / "run_low.log"
-SILLYCAPTION_ROOT = REPO_ROOT / "SillyCaption"
-SILLYCAPTION_INDEX_PATH = SILLYCAPTION_ROOT / "index.html"
-SILLYCAPTION_STATIC_DIR = SILLYCAPTION_ROOT / "static"
-SILLYCAPTION_SRC_DIR = SILLYCAPTION_ROOT / "src"
-SILLYCAPTION_DATASETS_DIR = SILLYCAPTION_ROOT / "Datasets"
 API_KEY_CONFIG_PATH = Path.home() / ".config" / "vastai" / "vast_api_key"
 MANAGE_KEYS_URL = "https://cloud.vast.ai/manage-keys"
 CLOUD_SETTINGS_URL = "https://cloud.vast.ai/settings/"
 DATASET_ROOT.mkdir(parents=True, exist_ok=True)
-SILLYCAPTION_DATASETS_DIR.mkdir(parents=True, exist_ok=True)
 
 IMAGE_EXTENSIONS = {
     ".png",
@@ -538,18 +530,6 @@ class ApiKeyRequest(BaseModel):
     api_key: str = Field(min_length=1)
 
 
-class ExportItem(BaseModel):
-    name: str
-    relative_path: Optional[str] = None
-    caption: Optional[str] = None
-    source_type: Literal["upload", "active", "library"] = "upload"
-    library_name: Optional[str] = None
-    upload_field: Optional[str] = None
-
-
-class ExportPayload(BaseModel):
-    items: List[ExportItem]
-    dataset_name: Optional[str] = None
 
 
 class DeleteDatasetItem(BaseModel):
@@ -753,18 +733,6 @@ event_manager = EventManager()
 training_state = TrainingState()
 app = FastAPI(title="WAN 2.2 Training UI")
 
-if SILLYCAPTION_STATIC_DIR.exists():
-    app.mount(
-        "/SillyCaption/static",
-        StaticFiles(directory=str(SILLYCAPTION_STATIC_DIR)),
-        name="sillycaption-static",
-    )
-if SILLYCAPTION_SRC_DIR.exists():
-    app.mount(
-        "/SillyCaption/src",
-        StaticFiles(directory=str(SILLYCAPTION_SRC_DIR)),
-        name="sillycaption-src",
-    )
 
 app.add_middleware(TokenAuthMiddleware, token=AUTH_TOKEN)
 
@@ -776,11 +744,6 @@ async def index() -> str:
     return INDEX_HTML_PATH.read_text(encoding="utf-8")
 
 
-@app.get("/SillyCaption", response_class=HTMLResponse)
-async def sillycaption_index() -> str:
-    if not SILLYCAPTION_INDEX_PATH.exists():
-        raise HTTPException(status_code=500, detail="SillyCaption assets missing")
-    return SILLYCAPTION_INDEX_PATH.read_text(encoding="utf-8")
 
 
 def _clear_dataset_directory() -> None:
@@ -907,38 +870,6 @@ def _normalize_export_path(value: str) -> Path:
     return candidate
 
 
-def _resolve_library_dataset(dataset_name: str) -> Path:
-    sanitized = dataset_name.strip()
-    if not sanitized:
-        raise HTTPException(status_code=400, detail="Dataset name is required")
-    if sanitized in {".", ".."}:
-        raise HTTPException(status_code=400, detail="Invalid dataset name")
-    if any(sep in sanitized for sep in ("/", "\\")):
-        raise HTTPException(status_code=400, detail="Dataset name cannot contain path separators")
-    if len(sanitized) > 200:
-        raise HTTPException(status_code=400, detail="Dataset name is too long")
-    root_resolved = SILLYCAPTION_DATASETS_DIR.resolve()
-    dataset_path = (SILLYCAPTION_DATASETS_DIR / sanitized).resolve()
-    if dataset_path == root_resolved or root_resolved not in dataset_path.parents:
-        raise HTTPException(status_code=400, detail="Dataset path is invalid")
-    return dataset_path
-
-
-def _ensure_library_dataset(dataset_name: str) -> Path:
-    dataset_path = _resolve_library_dataset(dataset_name)
-    dataset_path.mkdir(parents=True, exist_ok=True)
-    return dataset_path
-
-
-def _resolve_library_file(dataset_name: str, relative_path: str) -> Path:
-    dataset_root = _resolve_library_dataset(dataset_name)
-    relative = _normalize_export_path(relative_path)
-    target_path = (dataset_root / relative).resolve()
-    if not target_path.exists() or not target_path.is_file():
-        raise HTTPException(status_code=404, detail="File not found in dataset")
-    if dataset_root not in target_path.parents:
-        raise HTTPException(status_code=400, detail="Invalid dataset path")
-    return target_path
 
 
 async def _write_upload_to_path(upload: UploadFile, destination: Path) -> None:
@@ -951,165 +882,8 @@ async def _write_upload_to_path(upload: UploadFile, destination: Path) -> None:
             handle.write(chunk)
 
 
-def _collect_sillycaption_items(dataset_root: Path, route_prefix: str) -> List[Dict[str, Any]]:
-    if not dataset_root.exists() or not dataset_root.is_dir():
-        return []
-
-    resolved_root = dataset_root.resolve()
-    captions: Dict[tuple[str, str], Dict[str, Any]] = {}
-
-    for file_path in resolved_root.rglob("*"):
-        if not file_path.is_file():
-            continue
-        suffix = file_path.suffix.lower()
-        if suffix not in CAPTION_EXTENSIONS:
-            continue
-
-        relative = file_path.relative_to(resolved_root)
-        parent_key = relative.parent.as_posix()
-        stem_key = file_path.stem.lower()
-        priority = CAPTION_PRIORITY.get(suffix, 999)
-        existing = captions.get((parent_key, stem_key))
-        if existing and existing["priority"] <= priority:
-            continue
-
-        try:
-            text = file_path.read_text(encoding="utf-8", errors="replace").strip()
-        except OSError:
-            text = ""
-
-        captions[(parent_key, stem_key)] = {
-            "caption_path": relative.as_posix(),
-            "caption_text": text,
-            "priority": priority,
-        }
-
-    items: List[Dict[str, Any]] = []
-
-    for file_path in resolved_root.rglob("*"):
-        if not file_path.is_file():
-            continue
-        suffix = file_path.suffix.lower()
-        if suffix not in MEDIA_EXTENSIONS:
-            continue
-
-        relative = file_path.relative_to(resolved_root)
-        parent_key = relative.parent.as_posix()
-        stem_key = file_path.stem.lower()
-        caption_info = captions.get((parent_key, stem_key), {})
-        encoded = quote(relative.as_posix(), safe="/")
-        media_type, _ = mimetypes.guess_type(str(file_path))
-        items.append(
-            {
-                "relative_path": relative.as_posix(),
-                "kind": "video" if suffix in VIDEO_EXTENSIONS else "image",
-                "media_url": f"{route_prefix}/{encoded}",
-                "caption_text": caption_info.get("caption_text"),
-                "caption_path": caption_info.get("caption_path"),
-                "media_type": media_type or "application/octet-stream",
-            }
-        )
-
-    items.sort(key=lambda item: item["relative_path"].lower())
-    return items
 
 
-async def _export_dataset(
-    items: List[ExportItem],
-    uploads: Dict[str, UploadFile],
-    target_root: Path,
-    preserve_dirs: Optional[Set[str]] = None,
-) -> Dict[str, Any]:
-    target_root = target_root.resolve()
-    target_root.parent.mkdir(parents=True, exist_ok=True)
-    temp_dir_path = Path(tempfile.mkdtemp(prefix="sillycaption_", dir=str(target_root.parent)))
-    written = 0
-    preserved = {name.strip("/\\").lower() for name in preserve_dirs or set()}
-
-    try:
-        for item in items:
-            relative_value = (item.relative_path or "").strip()
-            fallback_name = Path(item.name).name
-            relative_name = relative_value or fallback_name
-            relative_path = _normalize_export_path(relative_name)
-            destination = temp_dir_path / relative_path
-            destination.parent.mkdir(parents=True, exist_ok=True)
-
-            if item.source_type == "upload":
-                field = item.upload_field
-                if not field:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Missing upload field for {relative_path.as_posix()}",
-                    )
-                upload = uploads.get(field)
-                if upload is None:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Upload '{field}' not found for {relative_path.as_posix()}",
-                    )
-                await _write_upload_to_path(upload, destination)
-            elif item.source_type == "active":
-                source_relative = (item.relative_path or relative_path.as_posix()).strip()
-                source_path = _resolve_dataset_file(source_relative)
-                shutil.copy2(source_path, destination)
-            elif item.source_type == "library":
-                if not item.library_name:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"library_name is required for {relative_path.as_posix()}",
-                    )
-                source_relative = (item.relative_path or relative_path.as_posix()).strip()
-                source_path = _resolve_library_file(item.library_name, source_relative)
-                shutil.copy2(source_path, destination)
-            else:
-                raise HTTPException(status_code=400, detail=f"Unsupported source type: {item.source_type}")
-
-            caption_text = (item.caption or "").strip()
-            caption_path = destination.with_suffix(".txt")
-            if caption_text:
-                caption_path.parent.mkdir(parents=True, exist_ok=True)
-                caption_path.write_text(caption_text, encoding="utf-8")
-            else:
-                try:
-                    caption_path.unlink()
-                except FileNotFoundError:
-                    pass
-            written += 1
-
-        if target_root.exists():
-            if preserved:
-                for entry in target_root.iterdir():
-                    if entry.is_dir() and entry.name.lower() in preserved:
-                        continue
-                    if entry.is_dir():
-                        shutil.rmtree(entry)
-                    else:
-                        entry.unlink()
-                for entry in temp_dir_path.iterdir():
-                    if entry.name.lower() in preserved:
-                        continue
-                    destination = target_root / entry.name
-                    if destination.exists():
-                        if destination.is_dir():
-                            shutil.rmtree(destination)
-                        else:
-                            destination.unlink()
-                    shutil.move(str(entry), destination)
-            else:
-                shutil.rmtree(target_root)
-                temp_dir_path.replace(target_root)
-        else:
-            temp_dir_path.replace(target_root)
-        return {"written": written}
-    finally:
-        for upload in uploads.values():
-            try:
-                await upload.close()
-            except Exception:
-                pass
-        if temp_dir_path.exists():
-            shutil.rmtree(temp_dir_path, ignore_errors=True)
 
 
 def _delete_dataset_item(relative_path: str) -> Dict[str, Any]:
@@ -1154,107 +928,6 @@ def _delete_dataset_item(relative_path: str) -> Dict[str, Any]:
     }
 
 
-@app.get("/SillyCaption/api/active/items")
-async def sillycaption_active_items() -> Dict[str, Any]:
-    items = _collect_sillycaption_items(DATASET_ROOT, "/SillyCaption/api/active/media")
-    return {"items": items, "total": len(items)}
-
-
-@app.get("/SillyCaption/api/active/media/{path:path}")
-async def sillycaption_active_media(path: str) -> StreamingResponse:
-    file_path = _resolve_dataset_file(path)
-    media_type, _ = mimetypes.guess_type(str(file_path))
-    return StreamingResponse(file_path.open("rb"), media_type=media_type or "application/octet-stream")
-
-
-@app.get("/SillyCaption/api/library")
-async def sillycaption_library_datasets() -> Dict[str, Any]:
-    datasets: List[Dict[str, Any]] = []
-    root = SILLYCAPTION_DATASETS_DIR.resolve()
-    if not root.exists():
-        return {"datasets": datasets}
-
-    for entry in sorted(root.iterdir(), key=lambda p: p.name.lower()):
-        if not entry.is_dir():
-            continue
-        count = 0
-        try:
-            for file_path in entry.rglob("*"):
-                if file_path.is_file() and file_path.suffix.lower() in MEDIA_EXTENSIONS:
-                    count += 1
-        except OSError:
-            count = 0
-        datasets.append({"name": entry.name, "media_count": count})
-    return {"datasets": datasets}
-
-
-@app.get("/SillyCaption/api/library/{dataset_name}/items")
-async def sillycaption_library_items(dataset_name: str) -> Dict[str, Any]:
-    dataset_root = _resolve_library_dataset(dataset_name)
-    if not dataset_root.exists() or not dataset_root.is_dir():
-        raise HTTPException(status_code=404, detail="Dataset not found")
-    prefix = f"/SillyCaption/api/library/{quote(dataset_name, safe='')}/media"
-    items = _collect_sillycaption_items(dataset_root, prefix)
-    return {"items": items, "total": len(items)}
-
-
-@app.get("/SillyCaption/api/library/{dataset_name}/media/{path:path}")
-async def sillycaption_library_media(dataset_name: str, path: str) -> StreamingResponse:
-    file_path = _resolve_library_file(dataset_name, path)
-    media_type, _ = mimetypes.guess_type(str(file_path))
-    return StreamingResponse(file_path.open("rb"), media_type=media_type or "application/octet-stream")
-
-
-async def _parse_export_payload(form_data) -> ExportPayload:
-    payload_raw = form_data.get("payload")
-    if not isinstance(payload_raw, str):
-        raise HTTPException(status_code=400, detail="Missing payload")
-    try:
-        payload_dict = json.loads(payload_raw)
-    except json.JSONDecodeError as exc:
-        raise HTTPException(status_code=400, detail="Invalid payload JSON") from exc
-    try:
-        return ExportPayload.parse_obj(payload_dict)
-    except ValidationError as exc:
-        raise HTTPException(status_code=400, detail=f"Invalid payload: {exc}") from exc
-
-
-def _extract_uploads(form_data) -> Dict[str, UploadFile]:
-    uploads: Dict[str, UploadFile] = {}
-    for key, value in form_data.multi_items():
-        if isinstance(value, UploadFile):
-            uploads[key] = value
-    return uploads
-
-
-@app.post("/SillyCaption/api/export/active")
-async def sillycaption_export_active(request: Request) -> Dict[str, Any]:
-    form = await request.form()
-    payload = await _parse_export_payload(form)
-    uploads = _extract_uploads(form)
-    result = await _export_dataset(
-        payload.items,
-        uploads,
-        DATASET_ROOT,
-        preserve_dirs=PROTECTED_DATASET_DIRS,
-    )
-    return {"message": "Active training dataset updated.", **result}
-
-
-@app.post("/SillyCaption/api/export/library")
-async def sillycaption_export_library(request: Request) -> Dict[str, Any]:
-    form = await request.form()
-    payload = await _parse_export_payload(form)
-    if not payload.dataset_name:
-        raise HTTPException(status_code=400, detail="dataset_name is required")
-    dataset_root = _ensure_library_dataset(payload.dataset_name)
-    uploads = _extract_uploads(form)
-    result = await _export_dataset(payload.items, uploads, dataset_root)
-    return {
-        "message": f"Dataset '{payload.dataset_name}' saved to library.",
-        "dataset_name": payload.dataset_name,
-        **result,
-    }
 
 
 @app.post("/upload")
