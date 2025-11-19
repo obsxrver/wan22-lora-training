@@ -4,7 +4,6 @@
 # For use with vastai/pytorch:latest docker image
 set -euo pipefail
 source /venv/main/bin/activate
-# ---------- helpers ----------
 pids=()
 wait_all() {
   local status=0
@@ -19,7 +18,6 @@ wait_all() {
   fi
 }
 
-# ---------- prep (sequential) ----------
 cd /workspace
 if [[ ! -d wan22-lora-training ]]; then
   git clone https://github.com/obsxrver/wan22-lora-training.git
@@ -29,75 +27,45 @@ if [[ ! -d musubi-tuner ]]; then
 fi
 cd musubi-tuner
 git fetch --all --tags --prune
-#git checkout d0a193061a23a51c90664282205d753605a641c1
 
-# directories for datasets and models
 mkdir -p models/text_encoders models/vae models/diffusion_models
 mkdir -p /workspace/musubi-tuner/dataset
 
-# fetch dataset config and training helper ahead of parallel tasks
 curl -fsSL "https://raw.githubusercontent.com/obsxrver/wan22-lora-training/main/dataset.toml" -o /workspace/musubi-tuner/dataset/dataset.toml
 curl -fsSL "https://raw.githubusercontent.com/obsxrver/wan22-lora-training/main/run_wan_training.sh" -o /workspace/run_wan_training.sh
 curl -fsSL "https://raw.githubusercontent.com/obsxrver/wan22-lora-training/main/analyze_training_logs.py" -o /workspace/analyze_training_logs.py
 chmod +x /workspace/run_wan_training.sh
 chmod +x /workspace/analyze_training_logs.py
 
-# ensure huggingface-cli exists for downloads (system Python, outside venv)
-# Install latest version with system package handling
 pip install -U "huggingface_hub>=0.20.0" --break-system-packages || \
 pip install -U huggingface_hub --break-system-packages || \
 pip install -U huggingface_hub
 
-# install vastai CLI for instance management and cloud storage
-# Handle system package conflicts gracefully
-# I think that vastai is pre-installed
-#python3 -m pip install -U vastai --break-system-packages || {
-#  echo "Warning: vastai installation had conflicts, trying alternative approach..."
-#  python3 -m pip install vastai --user --break-system-packages
-#}
-#fix the stupid fucking dependency bug.
+#fix bug vastai introduced in latest image
+#TODO check if bug is patched and remove
 /usr/bin/python3 -m pip install rich
-#test if vastai command is available if not install in venv
+
 if ! command -v vastai >/dev/null 2>&1; then
   pip install vastai
 fi
 
 
-# Set up vastai API key - prefer VASTAI_KEY, fallback to CONTAINER_API_KEY
 if [[ -n "${VASTAI_KEY:-}" ]]; then
   echo "Setting up Vast.ai API key from VASTAI_KEY..."
   vastai set api-key "$VASTAI_KEY" || echo "Warning: Failed to set vastai API key"
-elif [[ -n "${CONTAINER_API_KEY:-}" ]]; then
-  echo "Setting up Vast.ai API key from CONTAINER_API_KEY..."
-  vastai set api-key "$CONTAINER_API_KEY" || echo "Warning: Failed to set vastai API key"
-else
-  echo "No VASTAI_KEY or CONTAINER_API_KEY found. You'll need to set the API key manually:"
-  echo "  vastai set api-key YOUR_API_KEY"
 fi
 
-# ---------- parallel tasks ----------
-# Task 1: Install dependencies in the exact order from README
 (
   set -euo pipefail
   cd /workspace/musubi-tuner
 
-  sudo apt-get update
+  sudo apt-get update -y
   
-  #i dont remember why we used a separate venv when we already had one
-  #python3 -m venv venv
-  # shellcheck disable=SC1091
-  #source venv/bin/activate
-
   pip install -e .
-  pip install protobuf
-  pip install six
-  pip install matplotlib
-  pip install fastapi "uvicorn[standard]" python-multipart
-  pip install tomli
-  pip install torch torchvision
+  pip install protobuf six matplotlib fastapi "uvicorn[standard]" python-multipart tomli torch torchvision
 ) & pids+=($!)
 
-# Task 2: Download all four models concurrently
+
 (
   set -euo pipefail
   cd /workspace/musubi-tuner
