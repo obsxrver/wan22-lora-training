@@ -6,8 +6,7 @@ resolution = [960 , 960]
 caption_extension = ".txt"
 batch_size = 1
 enable_bucket = true
-bucket_no_upscale = false
-
+bucket_no_upscale = true
 [[datasets]]
 image_directory = "/workspace/musubi-tuner/dataset"
 cache_directory = "/workspace/musubi-tuner/dataset/cache"
