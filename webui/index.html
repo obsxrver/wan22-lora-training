@@ -593,8 +593,7 @@
               <h3>Current dataset</h3>
             </summary>
             <p class="dataset-preview-hint">
-              Need captions? Try the SillyCaption tool from the navigation bar to auto-generate prompts for images or videos that
-              are still missing descriptions before you start training.
+              Need captions? Try the SillyCaption tool from the nav-bar to auto-generate captions before you start training.
             </p>
             <div id="dataset-preview-message" aria-live="polite">No dataset files uploaded yet.</div>
             <div id="dataset-grid" class="dataset-grid" role="list"></div>
@@ -625,7 +624,7 @@
           </div>
           <div class="form-row">
             <fieldset class="mode-fieldset">
-              <legend>Training task</legend>
+              <legend>Task</legend>
               <div class="mode-options" role="radiogroup" aria-label="Training task">
                 <label class="mode-option">
                   <input type="radio" name="trainingMode" value="t2v" checked />
@@ -636,7 +635,6 @@
                   <span>Image to Video (I2V)</span>
                 </label>
               </div>
-              <p class="mode-hint">Choose I2V to train with the image-to-video task and models.</p>
             </fieldset>
           </div>
           <div class="form-row">
@@ -645,18 +643,18 @@
               <div class="mode-options" role="radiogroup" aria-label="Noise schedule">
                 <label class="mode-option">
                   <input type="radio" name="noiseMode" value="both" checked />
-                  <span>Train high and low noise (recommended)</span>
+                  <span>High Noise & Low Noise (Recommended)</span>
                 </label>
                 <label class="mode-option">
                   <input type="radio" name="noiseMode" value="high" />
-                  <span>Train high noise only</span>
+                  <span>High Noise Only</span>
                 </label>
                 <label class="mode-option">
                   <input type="radio" name="noiseMode" value="low" />
-                  <span>Train low noise only</span>
+                  <span>Low Noise Only</span>
                 </label>
               </div>
-              <p class="mode-hint">Limit training to a single noise model if you want to save time or VRAM.</p>
+              <p class="mode-hint">If your instance has more than 1 GPU, you can train high noise and low noise simultaneously.</p>
             </fieldset>
           </div>
           <div class="form-row two-col">

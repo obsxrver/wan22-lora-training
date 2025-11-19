@@ -1,5 +1,7 @@
 #!/bin/bash
-# Provisioning script for Vast.ai to setup musubi-tuner with correct install order and parallel model downloads
+# Provisioning script for Vast.ai to setup musubi-tuner and the training webui.
+# Verified on  vastai/pytorch:cuda-12.9.1-auto
+# For use with vastai/pytorch:latest docker image
 set -euo pipefail
 source /venv/main/bin/activate
 # ---------- helpers ----------
