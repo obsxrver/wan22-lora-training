@@ -380,6 +380,25 @@ async def _probe_video_fps(path: Path, ffprobe_path: str) -> Optional[float]:
         return None
 
 
+DATASET_CONFIG_FALLBACK_URL = (
+    "https://raw.githubusercontent.com/obsxrver/wan22-lora-training/refs/heads/main/dataset.toml"
+)
+
+
+def _download_dataset_config(config_path: Path) -> None:
+    import urllib.request
+
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    with urllib.request.urlopen(DATASET_CONFIG_FALLBACK_URL) as response:
+        if getattr(response, "status", 200) != 200:
+            raise VideoConversionError(
+                f"Failed to download dataset config from {DATASET_CONFIG_FALLBACK_URL}."
+            )
+        data = response.read()
+    with config_path.open("wb") as handle:
+        handle.write(data)
+
+
 async def convert_videos_to_target_fps(
     config_path: Path,
     target_fps: int,
@@ -395,6 +414,18 @@ async def convert_videos_to_target_fps(
             missing.append("ffprobe")
         tools = " and ".join(missing)
         raise VideoConversionError(f"Required tool(s) {tools} not found in PATH.")
+
+    if not config_path.exists():
+        await log_callback(
+            f"Dataset config '{config_path}' not found locally. Downloading default dataset configuration..."
+        )
+        try:
+            await asyncio.to_thread(_download_dataset_config, config_path)
+        except Exception as exc:  # pragma: no cover - network failures surface to user
+            raise VideoConversionError(
+                f"Unable to download dataset config '{config_path}': {exc}"
+            ) from exc
+        await log_callback("Default dataset configuration downloaded successfully.")
 
     directories = _load_video_directories(config_path)
     if not directories:
