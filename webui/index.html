@@ -192,6 +192,80 @@
         color: var(--muted);
       }
 
+      .preset-row {
+        display: flex;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+        align-items: center;
+        margin-top: 0.35rem;
+      }
+
+      .preset-row input,
+      .preset-row select {
+        flex: 1;
+        min-width: 220px;
+      }
+
+      .param-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 1rem;
+        flex-wrap: wrap;
+        margin-bottom: 0.5rem;
+      }
+
+      .param-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        gap: 0.75rem;
+        margin: 0.5rem 0 1rem;
+      }
+
+      .param-card {
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 0.85rem;
+        background: rgba(255, 255, 255, 0.03);
+      }
+
+      .param-card label {
+        font-weight: 600;
+        display: block;
+        margin-bottom: 0.25rem;
+      }
+
+      .param-card input,
+      .param-card textarea,
+      .param-card select {
+        width: 100%;
+        padding: 0.55rem;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: var(--bg);
+        color: var(--text);
+      }
+
+      .param-card textarea {
+        min-height: 70px;
+        resize: vertical;
+      }
+
+      .param-card .checkbox-row {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+
+      .param-section-title {
+        margin: 0.5rem 0 0.25rem;
+        font-size: 1rem;
+      }
+
+      .hidden {
+        display: none;
+      }
+
       #dataset-preview-message {
         margin-top: 0.75rem;
         font-size: 0.9rem;
@@ -623,6 +697,25 @@
             </label>
           </div>
           <div class="form-row">
+            <label>
+              Presets
+              <div class="preset-row">
+                <select id="presetSelect" aria-label="Preset selector"></select>
+                <button type="button" id="loadPresetButton" class="button-secondary">Load preset</button>
+              </div>
+              <div class="preset-row">
+                <input
+                  type="text"
+                  id="presetNameInput"
+                  placeholder="Preset name, e.g. /u/AI_Characters"
+                  autocomplete="off"
+                />
+                <button type="button" id="savePresetButton">Save current as preset</button>
+              </div>
+              <div id="presetMessage" class="status-note" aria-live="polite"></div>
+            </label>
+          </div>
+          <div class="form-row">
             <fieldset class="mode-fieldset">
               <legend>Task</legend>
               <div class="mode-options" role="radiogroup" aria-label="Training task">
@@ -651,7 +744,11 @@
                 </label>
                 <label class="mode-option">
                   <input type="radio" name="noiseMode" value="both" checked />
-                  <span>Both (Recommended)</span>
+                  <span>High &amp; Low (two commands)</span>
+                </label>
+                <label class="mode-option">
+                  <input type="radio" name="noiseMode" value="dual" />
+                  <span>High &amp; Low (single command)</span>
                 </label>
               </div>
               <p class="mode-hint">If your instance has 2 GPUs, I can train high noise and low noise simultaneously.</p>
@@ -686,6 +783,25 @@
               <input type="checkbox" name="convertVideos" />
               Convert dataset videos to 16 FPS before training
             </label>
+          </div>
+          <div class="form-row">
+            <div class="param-header">
+              <h3 class="param-section-title">Training parameters</h3>
+              <label class="toggle inline">
+                <input type="checkbox" id="splitParamsToggle" />
+                Use different commands for high noise
+              </label>
+            </div>
+            <div>
+              <h4 class="param-section-title">Shared parameters</h4>
+              <div id="sharedParams" class="param-grid"></div>
+            </div>
+            <div id="perNoiseParams" class="hidden">
+              <h4 class="param-section-title">High noise overrides</h4>
+              <div id="highParams" class="param-grid"></div>
+              <h4 class="param-section-title">Low noise overrides</h4>
+              <div id="lowParams" class="param-grid"></div>
+            </div>
           </div>
           <div id="cloudStatusMessage" class="status-note" aria-live="polite"></div>
           <div class="form-row">
@@ -752,6 +868,16 @@
       const uploadSummary = document.getElementById('upload-summary');
       const datasetGrid = document.getElementById('dataset-grid');
       const datasetMessage = document.getElementById('dataset-preview-message');
+      const presetSelect = document.getElementById('presetSelect');
+      const loadPresetButton = document.getElementById('loadPresetButton');
+      const savePresetButton = document.getElementById('savePresetButton');
+      const presetNameInput = document.getElementById('presetNameInput');
+      const presetMessage = document.getElementById('presetMessage');
+      const sharedParamsContainer = document.getElementById('sharedParams');
+      const highParamsContainer = document.getElementById('highParams');
+      const lowParamsContainer = document.getElementById('lowParams');
+      const splitParamsToggle = document.getElementById('splitParamsToggle');
+      const perNoiseParams = document.getElementById('perNoiseParams');
       const form = document.getElementById('trainingForm');
       const statusEl = document.getElementById('status');
       const messageEl = document.getElementById('message');
@@ -786,6 +912,249 @@
       const MAX_LOG_LINES = 400;
       const logLines = [];
       const VIDEO_EXTENSION_PATTERN = /\.(mp4|mov|avi|mkv|webm|mpg|mpeg)$/i;
+      const DEFAULT_PATHS = {
+        vae: '/workspace/musubi-tuner/models/vae/split_files/vae/wan_2.1_vae.safetensors',
+        t5: '/workspace/musubi-tuner/models/text_encoders/models_t5_umt5-xxl-enc-bf16.pth',
+        t2vHigh: '/workspace/musubi-tuner/models/diffusion_models/split_files/diffusion_models/wan2.2_t2v_high_noise_14B_fp16.safetensors',
+        t2vLow: '/workspace/musubi-tuner/models/diffusion_models/split_files/diffusion_models/wan2.2_t2v_low_noise_14B_fp16.safetensors',
+        i2vHigh: '/workspace/musubi-tuner/models/diffusion_models/split_files/diffusion_models/wan2.2_i2v_high_noise_14B_fp16.safetensors',
+        i2vLow: '/workspace/musubi-tuner/models/diffusion_models/split_files/diffusion_models/wan2.2_i2v_low_noise_14B_fp16.safetensors',
+        outputDir: '/workspace/musubi-tuner/output',
+      };
+
+      const PARAM_DEFINITIONS = [
+        { key: 'task', label: 'Task', type: 'text' },
+        { key: 'dit', label: 'DiT path', type: 'text' },
+        { key: 'dit_high_noise', label: 'High noise DiT', type: 'text' },
+        { key: 'vae', label: 'VAE path', type: 'text' },
+        { key: 't5', label: 'T5 path', type: 'text' },
+        { key: 'mixed_precision', label: 'Mixed precision', type: 'text' },
+        { key: 'fp8_base', label: 'FP8 base', type: 'checkbox' },
+        { key: 'fp8_scaled', label: 'FP8 scaled', type: 'checkbox' },
+        { key: 'fp8_t5', label: 'FP8 T5', type: 'checkbox' },
+        { key: 'optimizer_type', label: 'Optimizer type', type: 'text' },
+        { key: 'learning_rate', label: 'Learning rate', type: 'number' },
+        { key: 'gradient_checkpointing', label: 'Gradient checkpointing', type: 'checkbox' },
+        { key: 'gradient_accumulation_steps', label: 'Gradient accumulation steps', type: 'number' },
+        { key: 'max_data_loader_n_workers', label: 'Max data loader workers', type: 'number' },
+        { key: 'network_module', label: 'Network module', type: 'text' },
+        { key: 'network_dim', label: 'Network dim', type: 'number' },
+        { key: 'network_alpha', label: 'Network alpha', type: 'number' },
+        { key: 'timestep_sampling', label: 'Timestep sampling', type: 'text' },
+        { key: 'discrete_flow_shift', label: 'Discrete flow shift', type: 'number' },
+        { key: 'max_train_epochs', label: 'Max train epochs', type: 'number' },
+        { key: 'save_every_n_epochs', label: 'Save every n epochs', type: 'number' },
+        { key: 'seed', label: 'Seed', type: 'number' },
+        { key: 'optimizer_args', label: 'Optimizer args', type: 'text' },
+        { key: 'max_grad_norm', label: 'Max grad norm', type: 'number' },
+        { key: 'lr_scheduler', label: 'LR scheduler', type: 'text' },
+        { key: 'lr_scheduler_power', label: 'LR scheduler power', type: 'number' },
+        { key: 'lr_scheduler_min_lr_ratio', label: 'LR min lr ratio', type: 'number' },
+        { key: 'lr_warmup_steps', label: 'LR warmup steps', type: 'number' },
+        { key: 'output_dir', label: 'Output dir', type: 'text' },
+        { key: 'output_name', label: 'Output name', type: 'text' },
+        { key: 'metadata_title', label: 'Metadata title', type: 'text' },
+        { key: 'metadata_author', label: 'Metadata author', type: 'text' },
+        { key: 'preserve_distribution_shape', label: 'Preserve distribution shape', type: 'checkbox' },
+        { key: 'min_timestep', label: 'Min timestep', type: 'number' },
+        { key: 'max_timestep', label: 'Max timestep', type: 'number' },
+        { key: 'img_in_txt_in_offloading', label: 'img_in_txt_in_offloading', type: 'checkbox' },
+        { key: 'log_with', label: 'Log with', type: 'text' },
+        { key: 'logging_dir', label: 'Logging dir', type: 'text' },
+        { key: 'offload_inactive_dit', label: 'Offload inactive DiT', type: 'checkbox' },
+        { key: 'persistent_data_loader_workers', label: 'Persistent data loader workers', type: 'checkbox' },
+        { key: 'timestep_boundary', label: 'Timestep boundary', type: 'number' },
+        { key: 'vae_cache_cpu', label: 'VAE cache CPU', type: 'checkbox' },
+        { key: 'vae_dtype', label: 'VAE dtype', type: 'text' },
+        { key: 'sdpa', label: 'SDPA attention', type: 'checkbox' },
+        { key: 'blocks_to_swap', label: 'Blocks to swap', type: 'number' },
+        { key: 'network_args', label: 'Network args (one per line)', type: 'textarea' },
+    ];
+
+      function buildDefaultParams(trainingMode = 't2v') {
+        const isT2V = trainingMode === 't2v';
+        const shared = {
+          task: isT2V ? 't2v-A14B' : 'i2v-A14B',
+          vae: DEFAULT_PATHS.vae,
+          t5: DEFAULT_PATHS.t5,
+          mixed_precision: 'fp16',
+          fp8_base: true,
+          optimizer_type: 'adamw',
+          learning_rate: 0.0003,
+          gradient_checkpointing: true,
+          gradient_accumulation_steps: 1,
+          max_data_loader_n_workers: 8,
+          network_module: 'networks.lora_wan',
+          network_dim: 16,
+          network_alpha: 16,
+          timestep_sampling: 'shift',
+          discrete_flow_shift: 1,
+          max_train_epochs: 100,
+          save_every_n_epochs: 20,
+          seed: 5,
+          optimizer_args: 'weight_decay=0.1',
+          max_grad_norm: 0,
+          lr_scheduler: 'polynomial',
+          lr_scheduler_power: 8,
+          lr_scheduler_min_lr_ratio: 0.00005,
+          output_dir: DEFAULT_PATHS.outputDir,
+          metadata_author: 'authorName',
+          preserve_distribution_shape: true,
+          sdpa: true,
+        };
+
+        const high = {
+          dit: isT2V ? DEFAULT_PATHS.t2vHigh : DEFAULT_PATHS.i2vHigh,
+          min_timestep: 875,
+          max_timestep: 1000,
+        };
+
+        const low = {
+          dit: isT2V ? DEFAULT_PATHS.t2vLow : DEFAULT_PATHS.i2vLow,
+          min_timestep: 0,
+          max_timestep: 875,
+        };
+
+        return { shared, high, low };
+      }
+
+      function renderParams(container, values = {}) {
+        if (!container) return;
+        container.innerHTML = '';
+        PARAM_DEFINITIONS.forEach((def) => {
+          const card = document.createElement('div');
+          card.className = 'param-card';
+          card.dataset.key = def.key;
+
+          const label = document.createElement('label');
+          label.textContent = def.label;
+          card.appendChild(label);
+
+          let input;
+          if (def.type === 'checkbox') {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'checkbox-row';
+            input = document.createElement('input');
+            input.type = 'checkbox';
+            wrapper.appendChild(input);
+            wrapper.appendChild(document.createTextNode(' Enable'));
+            card.appendChild(wrapper);
+          } else if (def.type === 'textarea') {
+            input = document.createElement('textarea');
+            card.appendChild(input);
+          } else {
+            input = document.createElement('input');
+            input.type = def.type || 'text';
+            if (def.type === 'number') {
+              input.step = 'any';
+            }
+            card.appendChild(input);
+          }
+
+          const value = values[def.key];
+          if (def.type === 'checkbox') {
+            input.checked = Boolean(value ?? false);
+          } else if (def.type === 'textarea') {
+            if (Array.isArray(value)) {
+              input.value = value.join('\n');
+            } else if (value !== undefined && value !== null) {
+              input.value = value.toString();
+            }
+          } else if (value !== undefined && value !== null) {
+            input.value = value;
+          }
+
+          card.appendChild(input);
+          container.appendChild(card);
+        });
+      }
+
+      function applyParams(container, values = {}) {
+        if (!container) return;
+        container.querySelectorAll('.param-card').forEach((card) => {
+          const key = card.dataset.key;
+          const input = card.querySelector('input, textarea');
+          if (!input || !(key in values)) {
+            return;
+          }
+          const value = values[key];
+          if (input.type === 'checkbox') {
+            input.checked = Boolean(value);
+          } else if (input.tagName === 'TEXTAREA') {
+            if (Array.isArray(value)) {
+              input.value = value.join('\n');
+            } else {
+              input.value = value ?? '';
+            }
+          } else if (input.type === 'number') {
+            if (value === '' || value === null || value === undefined) {
+              input.value = '';
+            } else {
+              input.value = Number(value);
+            }
+          } else {
+            input.value = value ?? '';
+          }
+        });
+      }
+
+      function collectParams(container) {
+        const params = {};
+        if (!container) return params;
+        container.querySelectorAll('.param-card').forEach((card) => {
+          const key = card.dataset.key;
+          const input = card.querySelector('input, textarea');
+          if (!input) {
+            return;
+          }
+          if (input.type === 'checkbox') {
+            if (input.checked) {
+              params[key] = true;
+            }
+            return;
+          }
+          if (input.tagName === 'TEXTAREA') {
+            const lines = input.value
+              .split('\n')
+              .map((line) => line.trim())
+              .filter((line) => line.length > 0);
+            if (lines.length) {
+              params[key] = lines;
+            }
+            return;
+          }
+          const raw = input.value.trim();
+          if (!raw) {
+            return;
+          }
+          if (input.type === 'number') {
+            const numeric = Number(raw);
+            if (Number.isFinite(numeric)) {
+              params[key] = numeric;
+            }
+          } else {
+            params[key] = raw;
+          }
+        });
+        return params;
+      }
+
+      function buildTrainingParamsPayload(splitCommands) {
+        const shared = collectParams(sharedParamsContainer);
+        const high = splitCommands ? collectParams(highParamsContainer) : {};
+        const low = splitCommands ? collectParams(lowParamsContainer) : {};
+        return {
+          split_commands: Boolean(splitCommands),
+          shared,
+          high,
+          low,
+        };
+      }
+
+      function setSplitParamsUI(enabled) {
+        if (!perNoiseParams) return;
+        perNoiseParams.classList.toggle('hidden', !enabled);
+      }
 
       function setDatasetMessage(text = '', isError = false) {
         if (!datasetMessage) {
@@ -1230,6 +1599,154 @@
         }
       }
 
+      function setPresetMessage(text, isError = false) {
+        if (!presetMessage) return;
+        presetMessage.textContent = text;
+        presetMessage.style.color = isError ? '#ff8a80' : 'var(--muted)';
+      }
+
+      function applyPresetData(data) {
+        if (!data) return;
+        const mode = (data.training_mode || 't2v').toLowerCase();
+        const defaults = buildDefaultParams(mode);
+        const trainParams = data.train_params || {};
+        const sharedParams = { ...defaults.shared, ...(trainParams.shared || {}) };
+        const highParams = { ...defaults.high, ...(trainParams.high || {}) };
+        const lowParams = { ...defaults.low, ...(trainParams.low || {}) };
+
+        renderParams(sharedParamsContainer, sharedParams);
+        renderParams(highParamsContainer, highParams);
+        renderParams(lowParamsContainer, lowParams);
+
+        const splitCommands = Boolean(trainParams.split_commands);
+        if (splitParamsToggle) {
+          splitParamsToggle.checked = splitCommands;
+        }
+        setSplitParamsUI(splitCommands);
+
+        const datasetInput = form.querySelector('input[name="datasetPath"]');
+        if (datasetInput && data.dataset_path) {
+          datasetInput.value = data.dataset_path;
+        }
+
+        const titleInput = form.querySelector('input[name="titleSuffix"]');
+        if (titleInput && data.title_suffix) {
+          titleInput.value = data.title_suffix;
+        }
+
+        const authorInput = form.querySelector('input[name="author"]');
+        if (authorInput && data.author) {
+          authorInput.value = data.author;
+        }
+
+        const convertCheckbox = form.querySelector('input[name="convertVideos"]');
+        if (convertCheckbox) {
+          convertCheckbox.checked = Boolean(data.convert_videos_to_16fps);
+        }
+
+        const modeInput = form.querySelector(`input[name="trainingMode"][value="${mode}"]`);
+        if (modeInput) {
+          modeInput.checked = true;
+        }
+
+        const noiseMode = (data.noise_mode || 'both').toLowerCase();
+        const noiseInput = form.querySelector(`input[name="noiseMode"][value="${noiseMode}"]`);
+        if (noiseInput) {
+          noiseInput.checked = true;
+        }
+      }
+
+      async function refreshPresetOptions() {
+        if (!presetSelect) return;
+        presetSelect.innerHTML = '';
+        const placeholder = document.createElement('option');
+        placeholder.value = '';
+        placeholder.textContent = 'Select a preset';
+        presetSelect.appendChild(placeholder);
+        try {
+          const response = await fetch('/presets');
+          if (!response.ok) {
+            throw new Error('Failed to load presets');
+          }
+          const data = await response.json();
+          (data.presets || []).forEach((name) => {
+            const option = document.createElement('option');
+            option.value = name;
+            option.textContent = name;
+            presetSelect.appendChild(option);
+          });
+        } catch (error) {
+          setPresetMessage(error?.message || 'Failed to load presets.', true);
+        }
+      }
+
+      async function loadPresetByName(name) {
+        const normalized = (name || '').toString().trim();
+        if (!normalized) {
+          setPresetMessage('Pick a preset to load.');
+          return;
+        }
+        setPresetMessage('Loading preset…');
+        const safeName = normalized.replace(/^\//, '');
+        try {
+          const response = await fetch(`/presets/${encodeURIComponent(safeName)}`);
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            throw new Error(data?.detail || 'Failed to load preset');
+          }
+          applyPresetData(data);
+          setPresetMessage(`Loaded preset ${normalized}.`);
+        } catch (error) {
+          setPresetMessage(error?.message || 'Failed to load preset.', true);
+        }
+      }
+
+      async function saveCurrentPreset() {
+        const name = (presetNameInput?.value || '').trim();
+        if (!name) {
+          setPresetMessage('Enter a preset name, e.g. /u/AI_Characters.', true);
+          return;
+        }
+
+        const datasetPath = (form.querySelector('input[name="datasetPath"]')?.value || '').trim();
+        if (!datasetPath) {
+          setPresetMessage('Dataset path is required to save a preset.', true);
+          return;
+        }
+
+        const trainingMode = (form.querySelector('input[name="trainingMode"]:checked')?.value || 't2v').toLowerCase();
+        const noiseMode = (form.querySelector('input[name="noiseMode"]:checked')?.value || 'both').toLowerCase();
+        const convertVideos = form.querySelector('input[name="convertVideos"]')?.checked || false;
+        const splitCommands = splitParamsToggle?.checked || false;
+        const presetPayload = {
+          name,
+          dataset_path: datasetPath,
+          training_mode: trainingMode,
+          noise_mode: noiseMode,
+          convert_videos_to_16fps: convertVideos,
+          train_params: buildTrainingParamsPayload(splitCommands),
+          title_suffix: form.querySelector('input[name="titleSuffix"]')?.value || undefined,
+          author: form.querySelector('input[name="author"]')?.value || undefined,
+        };
+
+        setPresetMessage('Saving preset…');
+        try {
+          const response = await fetch('/presets/save', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(presetPayload),
+          });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            throw new Error(data?.detail || 'Failed to save preset');
+          }
+          setPresetMessage('Preset saved.');
+          await refreshPresetOptions();
+        } catch (error) {
+          setPresetMessage(error?.message || 'Failed to save preset.', true);
+        }
+      }
+
       async function refreshCloudStatus() {
         try {
           const response = await fetch('/cloud-status');
@@ -1596,6 +2113,44 @@
         }
       });
 
+      function initializeParamsUI() {
+        const trainingMode = (form.querySelector('input[name="trainingMode"]:checked')?.value || 't2v').toLowerCase();
+        const defaults = buildDefaultParams(trainingMode);
+        renderParams(sharedParamsContainer, defaults.shared);
+        renderParams(highParamsContainer, defaults.high);
+        renderParams(lowParamsContainer, defaults.low);
+        setSplitParamsUI(splitParamsToggle?.checked || false);
+      }
+
+      initializeParamsUI();
+      refreshPresetOptions();
+
+      if (splitParamsToggle) {
+        splitParamsToggle.addEventListener('change', () => setSplitParamsUI(splitParamsToggle.checked));
+      }
+
+      form.querySelectorAll('input[name="trainingMode"]').forEach((input) => {
+        input.addEventListener('change', () => {
+          initializeParamsUI();
+        });
+      });
+
+      if (loadPresetButton) {
+        loadPresetButton.addEventListener('click', () => loadPresetByName(presetSelect?.value || presetNameInput?.value || ''));
+      }
+
+      if (presetSelect) {
+        presetSelect.addEventListener('change', (event) => {
+          if (presetNameInput && event.target.value) {
+            presetNameInput.value = event.target.value;
+          }
+        });
+      }
+
+      if (savePresetButton) {
+        savePresetButton.addEventListener('click', saveCurrentPreset);
+      }
+
       function setStatus(text) {
         statusEl.textContent = text;
       }
@@ -1686,8 +2241,11 @@
         const trainingModeRaw = (formData.get('trainingMode') || 't2v').toString().toLowerCase();
         const trainingMode = trainingModeRaw === 'i2v' ? 'i2v' : 't2v';
         const noiseModeRaw = (formData.get('noiseMode') || 'both').toString().toLowerCase();
-        const noiseMode = noiseModeRaw === 'high' || noiseModeRaw === 'low' ? noiseModeRaw : 'both';
+        const noiseMode =
+          noiseModeRaw === 'high' || noiseModeRaw === 'low' || noiseModeRaw === 'dual' ? noiseModeRaw : 'both';
         const selectedRuns = noiseMode === 'high' ? ['high'] : noiseMode === 'low' ? ['low'] : ['high', 'low'];
+        const splitCommands = splitParamsToggle?.checked || false;
+        const trainParams = buildTrainingParamsPayload(splitCommands);
         const payload = {
           title_suffix: (formData.get('titleSuffix') || '').toString().trim() || 'mylora',
           author: (formData.get('author') || '').toString().trim() || 'authorName',
@@ -1701,7 +2259,10 @@
           auto_confirm: true,
           training_mode: trainingMode,
           noise_mode: noiseMode,
+          train_params: trainParams,
         };
+
+        trainParams.shared.save_every_n_epochs = payload.save_every;
 
         if (currentCloudStatus && !currentCloudStatus.can_upload) {
           payload.upload_cloud = false;
