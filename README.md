@@ -1,210 +1,87 @@
-# WAN2.2 LoRa Training WebUI
+# Wan 2.2 LoRA Training WebUI
+
+A full-featured WebUI for training Wan 2.2 LoRAs on Vast.AI. Supports both Text-to-Video (T2V) and Image-to-Video (I2V) training with real-time monitoring and cloud uploads.
 
 ### Looking for help with captioning? Auto-caption in under a minute with [https://obsxrver.pro/SillyCaption](https://obsxrver.pro/SillyCaption)
 
-## Quick Start
+## Quick Start on Vast.ai
 
-### Launch via Vast.ai Template
+### 1. Launch via Template
 
-Use the pre-built template to skip manual setup. Click the template link, pick a machine (2 x RTX 5090 recommended for concurrent high + low model training), add your captioned images and .txt captions under `/workspace/musubi-tuner/dataset/`, then run the simple runner:
+Use the pre-built template to skip manual setup. This template automatically installs dependencies, downloads the 14B models (T2V & I2V), and launches the WebUI.
 
-- Template: [Wan 2.2 LoRA Training Quickstart](https://cloud.vast.ai/?ref_id=208628&creator_id=208628&name=Wan%202.2%20LoRA%20Training%20Quickstart)
+- **Template:** [Wan 2.2 LoRA Training Quickstart](https://cloud.vast.ai/?ref_id=208628&creator_id=208628&name=Wan%202.2%20LoRA%20Training%20Quickstart)
 
-```bash
-# on the instance
-./run_wan_training.sh
-```
+**Recommended Hardware:**
+- **2x RTX 5090 / 2x H100:** Recommended for concurrent High + Low noise training.
+- **1x RTX 5090 / 1x H100:** Can train one noise level at a time (High or Low).
 
-## Automation Scripts
+### 2. Access the WebUI
 
-This repository includes helpers to streamline setup and training on Vast.ai.
+Once the instance is running (wait a few minutes for the startup script to finish downloading models):
+1.  Click the **"Open"** button on your Vast.AI instance.
+2.  Select **"wan-training-webui"** from the portal menu.
+3.  The UI will open in your browser.
 
-- `vast_provision.sh` provisions a fresh instance, installs dependencies, downloads the required models, and pulls `train_helper.py` into `/workspace`.
-- `run_wan_training.sh` Simple interactive training runner.
+## Features
 
-### Simple runner (recommended)
+- **Drag-and-Drop Dataset Manager:** Upload images, videos, and caption files directly from your browser.
+- **Live Training Monitor:** Watch loss curves and step progress in real-time.
+- **Dual-GPU Support:** Automatically utilizes multiple GPUs to train High and Low noise models simultaneously.
+- **Vast.AI Cloud Integration:** Automatically uploads finished LoRAs to your configured cloud storage.
+- **Cost Saving:** Option to automatically shut down the instance when training completes.
+- **Video Tools:** Built-in converter to standardize dataset videos to 16 FPS.
 
-Use the new `run_wan_training.sh` for a minimal, interactive flow that:
-- caches latents and text encodings
-- trains HIGH noise and LOW noise
-- waits for a free GPU for each job, running both concurrently if 2+ GPUs are free
+## Training Workflow
 
-```bash
-# on the Vast instance
-cd /workspace/musubi-tuner
-source venv/bin/activate
-cd /workspace
-bash run_wan_training.sh
-```
+### 1. Prepare Dataset
+Upload your training data directly in the "Upload dataset files" section.
+- **Media:** `.mp4`, `.mov`, `.png`, `.jpg`, etc.
+- **Captions:** `.txt` files matching the media filenames.
+- *Tip: Use the [SillyCaption](https://obsxrver.pro/SillyCaption) link in the header to auto-generate captions.*
 
-Prompts and defaults:
-- Title suffix: defaults to `mylora`. Final names become `WAN2.2-HighNoise_<suffix>` and `WAN2.2-LowNoise_<suffix>`.
-- Author: defaults to `authorName`.
-- Dataset path: defaults to `/workspace/musubi-tuner/dataset/dataset.toml`.
+### 2. Configure Training
+Set your parameters in the "Configure training" section:
+- **Title & Author:** metadata for your LoRA.
+- **Task:** Choose between Text-to-Video (T2V) or Image-to-Video (I2V).
+- **Noise Schedule:**
+    - **Both (Recommended):** Trains High and Low noise models together (requires 2 GPUs for speed).
+    - **High / Low Only:** Train specific noise levels.
+- **Cloud Upload:** Check this to save results to your Vast.AI cloud storage (requires API key).
 
-After training completes, the script automatically:
-- Analyzes training logs and generates loss curves
-- Creates CSV files with step/loss data
-- Generates a matplotlib visualization
-- Saves analysis to `training_analysis/` directory
-- Optionally uploads everything to cloud storage (if configured)
-- Optionally shuts down the instance to save costs
+### 3. Launch
+Click **"Start training"**. The WebUI will:
+1.  Cache text encoder outputs and VAE latents.
+2.  Launch the training process.
+3.  Stream logs and update loss graphs live.
 
-## WAN2.2 LoRa Training Workflow - AI_Characters
-*I did not make this guide. I am just archiving it from [(CivitAI)](https://civitai.com/articles/17740)* [(Original Author: AI_Characters)](https://civitai.com/user/AI_Characters)
+## Cloud Backup & Sync
 
-## 1. VastAI
+This tool can automatically upload your trained LoRAs to Google Drive, Dropbox, or R2/S3 immediately after training finishes.
 
-Launch an instance using the PyTorch (Vast) template on https://cloud.vast.ai (recommend using an H100)
+### 1. Configure Cloud Connection
+Before training, you must link your cloud storage to your Vast.AI account:
+1.  Go to [Vast.AI Cloud Data](https://cloud.vast.ai/data/).
+2.  Click **"New Connection"**.
+3.  Select your provider (Google Drive, Dropbox, etc.) and follow the authentication steps.
+4.  Name the connection (e.g., `mydrive`).
 
-Set up the environment:
-```bash
-sudo apt-get update
-git clone --recursive https://github.com/kohya-ss/musubi-tuner.git
-cd musubi-tuner
-git checkout d0a193061a23a51c90664282205d753605a641c1
-apt install -y libcudnn8=8.9.7.29-1+cuda12.2 libcudnn8-dev=8.9.7.29-1+cuda12.2 --allow-change-held-packages
-python3 -m venv venv
-source venv/bin/activate
-pip install -e .
-pip install protobuf
-pip install six
-pip install torch==2.7.0 torchvision==0.22.0 xformers==0.0.30 --index-url https://download.pytorch.org/whl/cu128
-```
+### 2. Add API Key to WebUI
+For the WebUI to access this connection, it needs your Vast.AI API Key:
+1.  Go to your [Vast.AI API Keys](https://cloud.vast.ai/manage-keys) page.
+2.  Copy your API key.
+3.  In the WebUI, under "Configure training", paste the key into the **"Vast.AI API key"** field and click **"Save key"**.
 
-Downloading the necessary models:
+Once configured, ensure the **"Upload LoRAs to cloud storage"** checkbox is selected. Your training results will be zipped and pushed to your cloud storage automatically.
 
-```bash
-cd /workspace/musubi-tuner
-huggingface-cli download Wan-AI/Wan2.1-I2V-14B-720P models_t5_umt5-xxl-enc-bf16.pth --local-dir models/text_encoders
-huggingface-cli download Comfy-Org/Wan_2.1_ComfyUI_repackaged split_files/vae/wan_2.1_vae.safetensors --local-dir models/vae
-huggingface-cli download Comfy-Org/Wan_2.2_ComfyUI_Repackaged split_files/diffusion_models/wan2.2_t2v_high_noise_14B_fp16.safetensors --local-dir models/diffusion_models
-huggingface-cli download Comfy-Org/Wan_2.2_ComfyUI_Repackaged split_files/diffusion_models/wan2.2_t2v_low_noise_14B_fp16.safetensors --local-dir models/diffusion_models
-```
+## Advanced Usage
 
-## 2. Dataset and Captions
+### Manual Access
+If you prefer the terminal, the WebUI runs on top of standard scripts located in `/workspace/wan22-lora-training/`. The underlying training repo is `musubi-tuner` located at `/workspace/musubi-tuner`.
 
-Put your images and captions into `/workspace/musubi-tuner/dataset/`.
+---
 
-Create the following `dataset.toml` and put it into `/workspace/musubi-tuner/dataset/`:
-
-```toml
-# resolution, caption_extension, batch_size, num_repeats, enable_bucket, bucket_no_upscale should be set in either general or datasets
-# otherwise, the default values will be used for each item
-# general configurations
-[general]
-resolution = [960 , 960]
-caption_extension = ".txt"
-batch_size = 1
-enable_bucket = true
-bucket_no_upscale = false
-
-[[datasets]]
-image_directory = "/workspace/musubi-tuner/dataset"
-cache_directory = "/workspace/musubi-tuner/dataset/cache"
-num_repeats = 1 # optional, default is 1. Number of times to repeat the dataset. Useful to balance the multiple datasets with different sizes.
-# other datasets can be added here. each dataset can have different configurations
-```
-
-## 3. Training
-
-Use the following command whenever you open a new terminal window (in order to activate the venv and be in the correct folder):
-
-```bash
-cd /workspace/musubi-tuner
-source venv/bin/activate
-```
-
-Run the following command to create the necessary latents for the training (needs to be rerun every time you change the dataset/captions):
-
-```bash
-python src/musubi_tuner/wan_cache_latents.py --dataset_config /workspace/musubi-tuner/dataset/dataset.toml --vae /workspace/musubi-tuner/models/vae/split_files/vae/wan_2.1_vae.safetensors
-```
-
-Run the following command to create the necessary text encoder cache for the training (needs to be rerun every time you change the dataset/captions):
-
-```bash
-python src/musubi_tuner/wan_cache_text_encoder_outputs.py --dataset_config /workspace/musubi-tuner/dataset/dataset.toml --t5 /workspace/musubi-tuner/models/text_encoders/models_t5_umt5-xxl-enc-bf16.pth
-```
-
-Run `accelerate config` once before training (select "no" for all options).
-
-If training on an RTX 5090, you need to swap out `--xformers` for `--sdpa` (Blackwell has compat. issues with xformers), and add `--blocks_to_swap 10` (or you will OOM)
-
-### High-noise training command:
-
-```bash
-accelerate launch --num_cpu_threads_per_process 1 src/musubi_tuner/wan_train_network.py \
---task t2v-A14B \
---dit /workspace/musubi-tuner/models/diffusion_models/split_files/diffusion_models/wan2.2_t2v_high_noise_14B_fp16.safetensors \
---vae /workspace/musubi-tuner/models/vae/split_files/vae/wan_2.1_vae.safetensors \
---t5 /workspace/musubi-tuner/models/text_encoders/models_t5_umt5-xxl-enc-bf16.pth \
---dataset_config /workspace/musubi-tuner/dataset/dataset.toml \
---xformers \
---mixed_precision fp16 \
---fp8_base \
---optimizer_type adamw \
---learning_rate 3e-4 \
---gradient_checkpointing \
---gradient_accumulation_steps 1 \
---max_data_loader_n_workers 2 \
---network_module networks.lora_wan \
---network_dim 16 \
---network_alpha 16 \
---timestep_sampling shift \
---discrete_flow_shift 1.0 \
---max_train_epochs 100 \
---save_every_n_epochs 100 \
---seed 5 \
---optimizer_args weight_decay=0.1 \
---max_grad_norm 0 \
---lr_scheduler polynomial \
---lr_scheduler_power 8 \
---lr_scheduler_min_lr_ratio="5e-5" \
---output_dir /workspace/musubi-tuner/output \
---output_name WAN2.2-HighNoise_MyLoRA \
---metadata_title WAN2.2-HighNoise_MyLoRA \
---metadata_author MyName \
---preserve_distribution_shape \
---min_timestep 875 \
---max_timestep 1000
-```
-
-### Low-noise training command:
-
-```bash
-accelerate launch --num_cpu_threads_per_process 1 src/musubi_tuner/wan_train_network.py \
---task t2v-A14B \
---dit /workspace/musubi-tuner/models/diffusion_models/split_files/diffusion_models/wan2.2_t2v_low_noise_14B_fp16.safetensors \
---vae /workspace/musubi-tuner/models/vae/split_files/vae/wan_2.1_vae.safetensors \
---t5 /workspace/musubi-tuner/models/text_encoders/models_t5_umt5-xxl-enc-bf16.pth \
---dataset_config /workspace/musubi-tuner/dataset/dataset.toml \
---xformers \
---mixed_precision fp16 \
---fp8_base \
---optimizer_type adamw \
---learning_rate 3e-4 \
---gradient_checkpointing \
---gradient_accumulation_steps 1 \
---max_data_loader_n_workers 2 \
---network_module networks.lora_wan \
---network_dim 16 \
---network_alpha 16 \
---timestep_sampling shift \
---discrete_flow_shift 1.0 \
---max_train_epochs 100 \
---save_every_n_epochs 100 \
---seed 5 \
---optimizer_args weight_decay=0.1 \
---max_grad_norm 0 \
---lr_scheduler polynomial \
---lr_scheduler_power 8 \
---lr_scheduler_min_lr_ratio="5e-5" \
---output_dir /workspace/musubi-tuner/output \
---output_name WAN2.2-LowNoise_MyLoRA \
---metadata_title WAN2.2-LowNoise_MyLoRA \
---metadata_author MyName \
---preserve_distribution_shape \
---min_timestep 0 \
---max_timestep 875
-```
+## Credits
+- WebUI & Automation by [obsxrver](https://github.com/obsxrver)
+- Training backend based on [musubi-tuner](https://github.com/kohya-ss/musubi-tuner)
+- Original workflow guide by [AI_Characters](https://civitai.com/user/AI_Characters)
