@@ -633,7 +633,7 @@ class UpdateCaptionRequest(BaseModel):
 
 
 
-TrainRequest.model_rebuild(TrainParams=TrainParams)
+TrainRequest.model_rebuild()
 
 
 class EventManager:
