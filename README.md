@@ -2,6 +2,8 @@
 
 A full-featured WebUI for training Wan 2.2 LoRAs on Vast.AI. Supports both Text-to-Video (T2V) and Image-to-Video (I2V) training with real-time monitoring and cloud uploads.
 
+![Wan 2.2 LoRA Training WebUI](media/1_UI.png)
+
 ### Looking for help with captioning? Auto-caption in under a minute with [https://obsxrver.pro/SillyCaption](https://obsxrver.pro/SillyCaption)
 
 ## Quick Start on Vast.ai
@@ -40,6 +42,8 @@ Upload your training data directly in the "Upload dataset files" section.
 - **Captions:** `.txt` files matching the media filenames.
 - *Tip: Use the [SillyCaption](https://obsxrver.pro/SillyCaption) link in the header to auto-generate captions.*
 
+![Dataset Management](media/3_dataset.png)
+
 ### 2. Configure Training
 Set your parameters in the "Configure training" section:
 - **Title & Author:** metadata for your LoRA.
@@ -54,6 +58,8 @@ Click **"Start training"**. The WebUI will:
 1.  Cache text encoder outputs and VAE latents.
 2.  Launch the training process.
 3.  Stream logs and update loss graphs live.
+
+![Live Training Progress](media/2_Live_Progress.png)
 
 ## Cloud Backup & Sync
 
