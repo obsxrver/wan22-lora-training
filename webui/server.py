@@ -1480,6 +1480,7 @@ async def start_training(payload: TrainRequest) -> Dict:
         active_runs = {"low"}
     else:
         active_runs = {"high", "low"}
+    train_params_path = _write_train_params(payload, dataset_config_path)
 
     if noise_mode == "dual":
         try:
