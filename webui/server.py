@@ -235,6 +235,32 @@ def _load_preset(name: str) -> Dict[str, Any]:
     preset_path = _preset_json_path(name)
     with preset_path.open("r", encoding="utf-8") as handle:
         return json.load(handle)
+        
+class TrainRequest(BaseModel):
+    title_suffix: str = Field(default="mylora", min_length=1)
+    author: str = Field(default="authorName", min_length=1)
+    dataset_path: str = Field(default=str(DATASET_ROOT / "dataset.toml"))
+    save_every: int = Field(default=100, ge=1)
+    cpu_threads_per_process: Optional[int] = Field(default=None, ge=1)
+    max_data_loader_workers: Optional[int] = Field(default=None, ge=1)
+    upload_cloud: bool = True
+    shutdown_instance: bool = True
+    auto_confirm: bool = True
+    training_mode: Literal["t2v", "i2v"] = "t2v"
+    noise_mode: Literal["both", "high", "low"] = "both"
+    convert_videos_to_16fps: bool = False
+    train_params: Optional["TrainParams"] = None
+    preset_name: Optional[str] = None
+
+class PresetPayload(BaseModel):
+    name: str = Field(min_length=1)
+    dataset_path: str = Field(min_length=1)
+    training_mode: Literal["t2v", "i2v"] = "t2v"
+    noise_mode: Literal["both", "high", "low"] = "both"
+    convert_videos_to_16fps: bool = False
+    train_params: Optional[TrainParams] = None
+    title_suffix: Optional[str] = None
+    author: Optional[str] = None
 
 
 def _save_preset(payload: PresetPayload) -> Dict[str, Any]:
@@ -580,21 +606,6 @@ async def convert_videos_to_target_fps(
 
 maybe_set_container_api_key()
 
-class TrainRequest(BaseModel):
-    title_suffix: str = Field(default="mylora", min_length=1)
-    author: str = Field(default="authorName", min_length=1)
-    dataset_path: str = Field(default=str(DATASET_ROOT / "dataset.toml"))
-    save_every: int = Field(default=100, ge=1)
-    cpu_threads_per_process: Optional[int] = Field(default=None, ge=1)
-    max_data_loader_workers: Optional[int] = Field(default=None, ge=1)
-    upload_cloud: bool = True
-    shutdown_instance: bool = True
-    auto_confirm: bool = True
-    training_mode: Literal["t2v", "i2v"] = "t2v"
-    noise_mode: Literal["both", "high", "low"] = "both"
-    convert_videos_to_16fps: bool = False
-    train_params: Optional["TrainParams"] = None
-    preset_name: Optional[str] = None
 
 
 class ApiKeyRequest(BaseModel):
@@ -620,15 +631,6 @@ class TrainParams(BaseModel):
     split_commands: bool = False
 
 
-class PresetPayload(BaseModel):
-    name: str = Field(min_length=1)
-    dataset_path: str = Field(min_length=1)
-    training_mode: Literal["t2v", "i2v"] = "t2v"
-    noise_mode: Literal["both", "high", "low"] = "both"
-    convert_videos_to_16fps: bool = False
-    train_params: Optional[TrainParams] = None
-    title_suffix: Optional[str] = None
-    author: Optional[str] = None
 
 
 TrainRequest.update_forward_refs(TrainParams=TrainParams)
