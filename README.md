@@ -72,7 +72,7 @@ Before training, you can link your cloud storage to your Vast.AI account for aut
 3.  Select your provider (Google Drive, Dropbox, etc.) and follow the authentication steps.
 4.  Name the connection (e.g., `mydrive`).
 
-### Add API Key to WebUI
+### 2. Add API Key to WebUI
 For the WebUI to access your cloud connection, it needs your Vast.AI API Key:
 1.  Go to your [Vast.AI API Keys](https://cloud.vast.ai/manage-keys) page.
 2.  Copy your API key.
