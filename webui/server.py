@@ -32,9 +32,11 @@ LOG_DIR = Path("/workspace/musubi-tuner")
 HIGH_LOG = LOG_DIR / "run_high.log"
 LOW_LOG = LOG_DIR / "run_low.log"
 API_KEY_CONFIG_PATH = Path.home() / ".config" / "vastai" / "vast_api_key"
+PRESET_ROOT = Path("presets")
 MANAGE_KEYS_URL = "https://cloud.vast.ai/manage-keys"
 CLOUD_SETTINGS_URL = "https://cloud.vast.ai/settings/"
 DATASET_ROOT.mkdir(parents=True, exist_ok=True)
+PRESET_ROOT.mkdir(parents=True, exist_ok=True)
 
 IMAGE_EXTENSIONS = {
     ".png",
@@ -199,6 +201,73 @@ def maybe_set_container_api_key() -> None:
         )
     except OSError:
         return
+
+
+def _normalize_preset_name(name: str) -> str:
+    normalized = name.strip().replace("\\", "/").strip("/")
+    parts = [part for part in normalized.split("/") if part not in {"", ".", ".."}]
+    return "/".join(parts)
+
+
+def _preset_json_path(name: str) -> Path:
+    normalized = _normalize_preset_name(name)
+    if not normalized:
+        raise ValueError("Preset name cannot be empty")
+    target = PRESET_ROOT / normalized
+    if target.suffix != ".json":
+        target = target.with_suffix(".json")
+    return target
+
+
+def _list_presets() -> List[str]:
+    presets: List[str] = []
+    for path in PRESET_ROOT.rglob("*.json"):
+        try:
+            relative = path.relative_to(PRESET_ROOT)
+            presets.append("/" + relative.as_posix().removesuffix(".json"))
+        except ValueError:
+            continue
+    presets.sort()
+    return presets
+
+
+def _load_preset(name: str) -> Dict[str, Any]:
+    preset_path = _preset_json_path(name)
+    with preset_path.open("r", encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def _save_preset(payload: PresetPayload) -> Dict[str, Any]:
+    preset_path = _preset_json_path(payload.name)
+    preset_path.parent.mkdir(parents=True, exist_ok=True)
+    dataset_source = Path(payload.dataset_path).expanduser()
+    if not dataset_source.exists():
+        raise HTTPException(status_code=400, detail="Dataset config not found for preset")
+    dataset_target = preset_path.with_suffix("") / "dataset.toml"
+    dataset_target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        shutil.copy(dataset_source, dataset_target)
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to copy dataset: {exc}") from exc
+
+    preset_data = {
+        "name": payload.name,
+        "dataset_path": str(dataset_target),
+        "training_mode": payload.training_mode,
+        "noise_mode": payload.noise_mode,
+        "convert_videos_to_16fps": payload.convert_videos_to_16fps,
+        "train_params": payload.train_params.dict() if payload.train_params else {},
+        "title_suffix": payload.title_suffix,
+        "author": payload.author,
+    }
+
+    try:
+        with preset_path.open("w", encoding="utf-8") as handle:
+            json.dump(preset_data, handle, indent=2)
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to save preset: {exc}") from exc
+
+    return preset_data
 
 
 async def gather_cloud_status() -> Dict[str, Any]:
@@ -524,6 +593,8 @@ class TrainRequest(BaseModel):
     training_mode: Literal["t2v", "i2v"] = "t2v"
     noise_mode: Literal["both", "high", "low"] = "both"
     convert_videos_to_16fps: bool = False
+    train_params: Optional["TrainParams"] = None
+    preset_name: Optional[str] = None
 
 
 class ApiKeyRequest(BaseModel):
@@ -540,6 +611,27 @@ class UpdateCaptionRequest(BaseModel):
     media_path: str = Field(min_length=1)
     caption_text: Optional[str] = None
     caption_path: Optional[str] = None
+
+
+class TrainParams(BaseModel):
+    shared: Dict[str, Any] = Field(default_factory=dict)
+    high: Dict[str, Any] = Field(default_factory=dict)
+    low: Dict[str, Any] = Field(default_factory=dict)
+    split_commands: bool = False
+
+
+class PresetPayload(BaseModel):
+    name: str = Field(min_length=1)
+    dataset_path: str = Field(min_length=1)
+    training_mode: Literal["t2v", "i2v"] = "t2v"
+    noise_mode: Literal["both", "high", "low"] = "both"
+    convert_videos_to_16fps: bool = False
+    train_params: Optional[TrainParams] = None
+    title_suffix: Optional[str] = None
+    author: Optional[str] = None
+
+
+TrainRequest.update_forward_refs(TrainParams=TrainParams)
 
 
 class EventManager:
@@ -999,6 +1091,27 @@ async def dataset_delete(payload: DeleteDatasetItem) -> Dict[str, Any]:
     return result
 
 
+@app.get("/presets")
+async def presets() -> Dict[str, Any]:
+    return {"presets": _list_presets()}
+
+
+@app.get("/presets/{preset_name}")
+async def preset_detail(preset_name: str) -> Dict[str, Any]:
+    try:
+        data = _load_preset(preset_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Preset not found") from exc
+    except (ValueError, OSError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return data
+
+
+@app.post("/presets/save")
+async def save_preset(payload: PresetPayload) -> Dict[str, Any]:
+    return _save_preset(payload)
+
+
 @app.post("/dataset/caption")
 async def dataset_update_caption(payload: UpdateCaptionRequest) -> Dict[str, Any]:
     media_path = payload.media_path.strip()
@@ -1277,7 +1390,29 @@ async def wait_for_completion(process: asyncio.subprocess.Process) -> None:
     await event_manager.publish({"type": "status", "status": status, "running": False, "returncode": returncode})
 
 
-def build_command(payload: TrainRequest) -> List[str]:
+def _write_train_params(payload: TrainRequest, dataset_config_path: Path) -> Optional[str]:
+    if not payload.train_params:
+        return None
+
+    data = {
+        "split_commands": bool(payload.train_params.split_commands),
+        "shared": payload.train_params.shared or {},
+        "high": payload.train_params.high or {},
+        "low": payload.train_params.low or {},
+    }
+    shared = data["shared"]
+    if isinstance(shared, dict):
+        shared.setdefault("dataset_config", str(dataset_config_path))
+
+    try:
+        with tempfile.NamedTemporaryFile("w", delete=False, suffix=".json", encoding="utf-8") as handle:
+            json.dump(data, handle, indent=2)
+            return handle.name
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to prepare training parameters: {exc}") from exc
+
+
+def build_command(payload: TrainRequest, train_params_path: Optional[str]) -> List[str]:
     args = ["bash", str(RUN_SCRIPT)]
     args.extend(["--title-suffix", payload.title_suffix])
     args.extend(["--author", payload.author])
@@ -1291,6 +1426,8 @@ def build_command(payload: TrainRequest) -> List[str]:
     args.extend(["--shutdown-instance", "Y" if payload.shutdown_instance else "N"])
     args.extend(["--mode", payload.training_mode])
     args.extend(["--noise-mode", payload.noise_mode])
+    if train_params_path:
+        args.extend(["--train-params", train_params_path])
     if payload.auto_confirm:
         args.append("--auto-confirm")
     return args
@@ -1339,8 +1476,9 @@ async def start_training(payload: TrainRequest) -> Dict:
         active_runs = {"low"}
     else:
         active_runs = {"high", "low"}
+    train_params_path = _write_train_params(payload, dataset_config_path)
 
-    command = build_command(payload)
+    command = build_command(payload, train_params_path)
     env = os.environ.copy()
     env.setdefault("PYTHONUNBUFFERED", "1")
 

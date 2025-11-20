@@ -1,0 +1,62 @@
+{
+  "name": "/u/ding-a-ling-berries (turbo)",
+  "dataset_path": "/workspace/wan22-lora-training/presets/u/ding-a-ling-berries (turbo)/dataset.toml",
+  "training_mode": "t2v",
+  "noise_mode": "both",
+  "convert_videos_to_16fps": false,
+  "train_params": {
+    "split_commands": true,
+    "shared": {
+      "task": "t2v-A14B",
+      "vae": "/workspace/musubi-tuner/models/vae/split_files/vae/wan_2.1_vae.safetensors",
+      "t5": "/workspace/musubi-tuner/models/text_encoders/models_t5_umt5-xxl-enc-bf16.pth",
+      "discrete_flow_shift": 3,
+      "fp8_base": true,
+      "fp8_scaled": true,
+      "fp8_t5": true,
+      "gradient_accumulation_steps": 2,
+      "gradient_checkpointing": true,
+      "img_in_txt_in_offloading": true,
+      "learning_rate": 0.0001,
+      "log_with": "tensorboard",
+      "logging_dir": "/workspace/musubi-tuner/logs",
+      "lr_scheduler": "cosine",
+      "lr_warmup_steps": 100,
+      "max_data_loader_n_workers": 8,
+      "max_timestep": 1000,
+      "max_train_epochs": 40,
+      "min_timestep": 0,
+      "mixed_precision": "fp16",
+      "network_alpha": 16,
+      "network_args": [
+        "verbose=True",
+        "exclude_patterns=[]"
+      ],
+      "network_dim": 16,
+      "network_module": "networks.lora_wan",
+      "offload_inactive_dit": true,
+      "optimizer_type": "AdamW8bit",
+      "output_dir": "/workspace/musubi-tuner/output",
+      "persistent_data_loader_workers": true,
+      "save_every_n_epochs": 1,
+      "seed": 42,
+      "timestep_boundary": 875,
+      "timestep_sampling": "logsnr",
+      "vae_cache_cpu": true,
+      "vae_dtype": "float16",
+      "sdpa": true
+    },
+    "high": {
+      "dit": "/workspace/musubi-tuner/models/diffusion_models/split_files/diffusion_models/wan2.2_t2v_high_noise_14B_fp16.safetensors",
+      "min_timestep": 875,
+      "max_timestep": 1000
+    },
+    "low": {
+      "dit": "/workspace/musubi-tuner/models/diffusion_models/split_files/diffusion_models/wan2.2_t2v_low_noise_14B_fp16.safetensors",
+      "min_timestep": 0,
+      "max_timestep": 875
+    }
+  },
+  "title_suffix": "mylora",
+  "author": "authorName"
+}

@@ -18,6 +18,7 @@ T2V_LOW_DIT="$MUSUBI_DIR/models/diffusion_models/split_files/diffusion_models/wa
 I2V_HIGH_DIT="$MUSUBI_DIR/models/diffusion_models/split_files/diffusion_models/wan2.2_i2v_high_noise_14B_fp16.safetensors"
 I2V_LOW_DIT="$MUSUBI_DIR/models/diffusion_models/split_files/diffusion_models/wan2.2_i2v_low_noise_14B_fp16.safetensors"
 DEFAULT_DATASET="$MUSUBI_DIR/dataset/dataset.toml"
+DEFAULT_OUTPUT_DIR="$MUSUBI_DIR/output"
 
 # CLI overrides (populated via command line flags or environment variables)
 TITLE_SUFFIX_INPUT="${WAN_TITLE_SUFFIX:-}"
@@ -31,6 +32,7 @@ CLI_SHUTDOWN_INSTANCE="${WAN_SHUTDOWN_INSTANCE:-}"
 TRAINING_MODE_INPUT="${WAN_TRAINING_MODE:-}"
 NOISE_MODE_INPUT="${WAN_NOISE_MODE:-}"
 AUTO_CONFIRM=0
+TRAIN_PARAMS_PATH=""
 
 CLOUD_PERMISSION_DENIED=0
 CLOUD_CONNECTION_MESSAGE=""
@@ -52,6 +54,7 @@ Optional arguments (all fall back to interactive prompts when omitted):
   --mode [t2v|i2v]                 Select the training task (text-to-video or image-to-video)
   --noise-mode [both|high|low]     Choose whether to train high noise, low noise, or both
   --auto-confirm                   Skip the final confirmation prompt
+  --train-params PATH              JSON file with training argument presets
   --help                           Show this message and exit
 
 Environment variable overrides:
@@ -121,6 +124,10 @@ while [[ $# -gt 0 ]]; do
     --auto-confirm)
       AUTO_CONFIRM=1
       shift 1
+      ;;
+    --train-params)
+      TRAIN_PARAMS_PATH="$2"
+      shift 2
       ;;
     --help)
       print_usage
@@ -221,6 +228,91 @@ determine_attention_flags() {
     echo "--sdpa --blocks_to_swap 1"
   else
     echo "--sdpa"
+  fi
+}
+
+build_custom_train_args() {
+  local noise="$1"
+  local output_name="$2"
+  local default_dit="$3"
+  local min_ts="$4"
+  local max_ts="$5"
+  local default_output_dir="$6"
+
+  if [[ -z "$TRAIN_PARAMS_PATH" ]]; then
+    return 0
+  fi
+
+  if [[ ! -f "$TRAIN_PARAMS_PATH" ]]; then
+    echo "Custom training params file not found: $TRAIN_PARAMS_PATH" >&2
+    exit 1
+  fi
+
+  mapfile -t CUSTOM_TRAIN_ARGS < <(python3 - "$TRAIN_PARAMS_PATH" "$noise" "$output_name" "$DATASET" "$AUTHOR" "$default_dit" "$VAE" "$T5" "$TRAIN_TASK" "$ATTN_FLAGS" "$min_ts" "$max_ts" "$default_output_dir" <<'PY'
+import json
+import shlex
+import sys
+from pathlib import Path
+
+path, noise, output_name, dataset, author, default_dit, vae, t5, task, attn_flags, min_ts, max_ts, output_dir = sys.argv[1:]
+
+with open(path, "r", encoding="utf-8") as handle:
+    data = json.load(handle)
+
+split_commands = bool(data.get("split_commands"))
+shared = data.get("shared")
+high = data.get("high")
+low = data.get("low")
+
+run_config = {}
+if isinstance(shared, dict):
+    run_config.update(shared)
+
+if split_commands:
+    selected = high if noise == "high" else low
+    if isinstance(selected, dict):
+        run_config.update(selected)
+
+defaults = {
+    "dataset_config": dataset,
+    "output_name": output_name,
+    "metadata_title": output_name,
+    "metadata_author": author,
+    "dit": default_dit,
+    "vae": vae,
+    "t5": t5,
+    "task": task,
+    "min_timestep": float(min_ts),
+    "max_timestep": float(max_ts),
+    "output_dir": output_dir,
+}
+
+for key, value in defaults.items():
+    run_config.setdefault(key, value)
+
+args: list[str] = []
+for key, value in run_config.items():
+    if value is None:
+        continue
+    if isinstance(value, bool):
+        if value:
+            args.append(f"--{key}")
+    elif isinstance(value, (list, tuple)):
+        args.append(f"--{key}")
+        args.extend(str(item) for item in value)
+    else:
+        args.extend([f"--{key}", str(value)])
+
+if attn_flags.strip():
+    args.extend(shlex.split(attn_flags))
+
+print("\n".join(args))
+PY
+  )
+
+  if (( ${#CUSTOM_TRAIN_ARGS[@]} == 0 )); then
+    echo "No custom training arguments produced; check $TRAIN_PARAMS_PATH" >&2
+    exit 1
   fi
 }
 
@@ -877,41 +969,50 @@ main() {
     echo "Waiting for a free GPU for HIGH noise training..."
     HIGH_GPU=$(wait_for_free_gpu)
     echo "Starting HIGH on GPU $HIGH_GPU (port $HIGH_PORT) -> run_high.log"
+    local -a HIGH_TRAIN_ARGS=()
+    if [[ -n "$TRAIN_PARAMS_PATH" ]]; then
+      build_custom_train_args "high" "$HIGH_TITLE" "$HIGH_DIT" 875 1000 "$DEFAULT_OUTPUT_DIR"
+      HIGH_TRAIN_ARGS=("${CUSTOM_TRAIN_ARGS[@]}")
+    else
+      HIGH_TRAIN_ARGS=(
+        --task "$TRAIN_TASK"
+        --dit "$HIGH_DIT"
+        --vae "$VAE"
+        --t5 "$T5"
+        --dataset_config "$DATASET"
+        $ATTN_FLAGS
+        --mixed_precision fp16
+        --fp8_base
+        --optimizer_type adamw
+        --learning_rate 3e-4
+        --gradient_checkpointing
+        --gradient_accumulation_steps 1
+        --max_data_loader_n_workers "$MAX_DATA_LOADER_WORKERS"
+        --network_module networks.lora_wan
+        --network_dim 16
+        --network_alpha 16
+        --timestep_sampling shift
+        --discrete_flow_shift 1.0
+        --max_train_epochs 100
+        --save_every_n_epochs "$SAVE_EVERY"
+        --seed 5
+        --optimizer_args weight_decay=0.1
+        --max_grad_norm 0
+        --lr_scheduler polynomial
+        --lr_scheduler_power 8
+        --lr_scheduler_min_lr_ratio=5e-5
+        --output_dir "$DEFAULT_OUTPUT_DIR"
+        --output_name "$HIGH_TITLE"
+        --metadata_title "$HIGH_TITLE"
+        --metadata_author "$AUTHOR"
+        --preserve_distribution_shape
+        --min_timestep 875
+        --max_timestep 1000
+      )
+    fi
     MASTER_ADDR=127.0.0.1 MASTER_PORT="$HIGH_PORT" CUDA_VISIBLE_DEVICES="$HIGH_GPU" \
     "$ACCELERATE" launch --num_cpu_threads_per_process "$CPU_THREADS_PER_PROCESS" --num_processes 1 --main_process_port "$HIGH_PORT" src/musubi_tuner/wan_train_network.py \
-      --task "$TRAIN_TASK" \
-      --dit "$HIGH_DIT" \
-      --vae "$VAE" \
-      --t5 "$T5" \
-      --dataset_config "$DATASET" \
-      $ATTN_FLAGS \
-      --mixed_precision fp16 \
-      --fp8_base \
-      --optimizer_type adamw \
-      --learning_rate 3e-4 \
-      --gradient_checkpointing \
-      --gradient_accumulation_steps 1 \
-      --max_data_loader_n_workers "$MAX_DATA_LOADER_WORKERS" \
-      --network_module networks.lora_wan \
-      --network_dim 16 \
-      --network_alpha 16 \
-      --timestep_sampling shift \
-      --discrete_flow_shift 1.0 \
-      --max_train_epochs 100 \
-      --save_every_n_epochs "$SAVE_EVERY" \
-      --seed 5 \
-      --optimizer_args weight_decay=0.1 \
-      --max_grad_norm 0 \
-      --lr_scheduler polynomial \
-      --lr_scheduler_power 8 \
-      --lr_scheduler_min_lr_ratio=5e-5 \
-      --output_dir "$MUSUBI_DIR/output" \
-      --output_name "$HIGH_TITLE" \
-      --metadata_title "$HIGH_TITLE" \
-      --metadata_author "$AUTHOR" \
-      --preserve_distribution_shape \
-      --min_timestep 875 \
-      --max_timestep 1000 \
+      "${HIGH_TRAIN_ARGS[@]}" \
       > "$PWD/run_high.log" 2>&1 &
     HIGH_PID=$!
     WAIT_PIDS+=("$HIGH_PID")
@@ -929,41 +1030,50 @@ main() {
       LOW_GPU=$(wait_for_free_gpu)
     fi
     echo "Starting LOW on GPU $LOW_GPU (port $LOW_PORT) -> run_low.log"
+    local -a LOW_TRAIN_ARGS=()
+    if [[ -n "$TRAIN_PARAMS_PATH" ]]; then
+      build_custom_train_args "low" "$LOW_TITLE" "$LOW_DIT" 0 875 "$DEFAULT_OUTPUT_DIR"
+      LOW_TRAIN_ARGS=("${CUSTOM_TRAIN_ARGS[@]}")
+    else
+      LOW_TRAIN_ARGS=(
+        --task "$TRAIN_TASK"
+        --dit "$LOW_DIT"
+        --vae "$VAE"
+        --t5 "$T5"
+        --dataset_config "$DATASET"
+        $ATTN_FLAGS
+        --mixed_precision fp16
+        --fp8_base
+        --optimizer_type adamw
+        --learning_rate 3e-4
+        --gradient_checkpointing
+        --gradient_accumulation_steps 1
+        --max_data_loader_n_workers "$MAX_DATA_LOADER_WORKERS"
+        --network_module networks.lora_wan
+        --network_dim 16
+        --network_alpha 16
+        --timestep_sampling shift
+        --discrete_flow_shift 1.0
+        --max_train_epochs 100
+        --save_every_n_epochs "$SAVE_EVERY"
+        --seed 5
+        --optimizer_args weight_decay=0.1
+        --max_grad_norm 0
+        --lr_scheduler polynomial
+        --lr_scheduler_power 8
+        --lr_scheduler_min_lr_ratio=5e-5
+        --output_dir "$DEFAULT_OUTPUT_DIR"
+        --output_name "$LOW_TITLE"
+        --metadata_title "$LOW_TITLE"
+        --metadata_author "$AUTHOR"
+        --preserve_distribution_shape
+        --min_timestep 0
+        --max_timestep 875
+      )
+    fi
     MASTER_ADDR=127.0.0.1 MASTER_PORT="$LOW_PORT" CUDA_VISIBLE_DEVICES="$LOW_GPU" \
     "$ACCELERATE" launch --num_cpu_threads_per_process "$CPU_THREADS_PER_PROCESS" --num_processes 1 --main_process_port "$LOW_PORT" src/musubi_tuner/wan_train_network.py \
-      --task "$TRAIN_TASK" \
-      --dit "$LOW_DIT" \
-      --vae "$VAE" \
-      --t5 "$T5" \
-      --dataset_config "$DATASET" \
-      $ATTN_FLAGS \
-      --mixed_precision fp16 \
-      --fp8_base \
-      --optimizer_type adamw \
-      --learning_rate 3e-4 \
-      --gradient_checkpointing \
-      --gradient_accumulation_steps 1 \
-      --max_data_loader_n_workers "$MAX_DATA_LOADER_WORKERS" \
-      --network_module networks.lora_wan \
-      --network_dim 16 \
-      --network_alpha 16 \
-      --timestep_sampling shift \
-      --discrete_flow_shift 1.0 \
-      --max_train_epochs 100 \
-      --save_every_n_epochs "$SAVE_EVERY" \
-      --seed 5 \
-      --optimizer_args weight_decay=0.1 \
-      --max_grad_norm 0 \
-      --lr_scheduler polynomial \
-      --lr_scheduler_power 8 \
-      --lr_scheduler_min_lr_ratio=5e-5 \
-      --output_dir "$MUSUBI_DIR/output" \
-      --output_name "$LOW_TITLE" \
-      --metadata_title "$LOW_TITLE" \
-      --metadata_author "$AUTHOR" \
-      --preserve_distribution_shape \
-      --min_timestep 0 \
-      --max_timestep 875 \
+      "${LOW_TRAIN_ARGS[@]}" \
       > "$PWD/run_low.log" 2>&1 &
     LOW_PID=$!
     WAIT_PIDS+=("$LOW_PID")
