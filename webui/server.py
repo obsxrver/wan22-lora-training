@@ -633,7 +633,7 @@ class UpdateCaptionRequest(BaseModel):
 
 
 
-TrainRequest.update_forward_refs(TrainParams=TrainParams)
+TrainRequest.model_rebuild(TrainParams=TrainParams)
 
 
 class EventManager:

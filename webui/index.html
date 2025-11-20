@@ -419,6 +419,43 @@
         grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
       }
 
+      .advanced-settings {
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 0.75rem 1rem;
+        background: rgba(255, 255, 255, 0.02);
+      }
+
+      .advanced-settings summary {
+        cursor: pointer;
+        font-weight: 700;
+        color: var(--text);
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        list-style: none;
+      }
+
+      .advanced-settings summary::-webkit-details-marker {
+        display: none;
+      }
+
+      .advanced-settings summary::before {
+        content: '\25BC';
+        font-size: 0.75rem;
+        transition: transform 0.2s ease;
+      }
+
+      .advanced-settings[open] summary::before {
+        transform: rotate(-180deg);
+      }
+
+      .advanced-content {
+        margin-top: 0.75rem;
+        display: grid;
+        gap: 1rem;
+      }
+
       label {
         display: flex;
         flex-direction: column;
@@ -692,114 +729,121 @@
           </div>
           <div class="form-row">
             <label>
-              Dataset config path
-              <input type="text" name="datasetPath" value="/workspace/musubi-tuner/dataset/dataset.toml" required />
-            </label>
-          </div>
-          <div class="form-row">
-            <label>
-              Presets
-              <div class="preset-row">
-                <select id="presetSelect" aria-label="Preset selector"></select>
-                <button type="button" id="loadPresetButton" class="button-secondary">Load preset</button>
-              </div>
-              <div class="preset-row">
-                <input
-                  type="text"
-                  id="presetNameInput"
-                  placeholder="Preset name, e.g. /u/AI_Characters"
-                  autocomplete="off"
-                />
-                <button type="button" id="savePresetButton">Save current as preset</button>
-              </div>
-              <div id="presetMessage" class="status-note" aria-live="polite"></div>
-            </label>
-          </div>
-          <div class="form-row">
-            <fieldset class="mode-fieldset">
-              <legend>Task</legend>
-              <div class="mode-options" role="radiogroup" aria-label="Training task">
-                <label class="mode-option">
-                  <input type="radio" name="trainingMode" value="t2v" checked />
-                  <span>Text to Video (T2V)</span>
-                </label>
-                <label class="mode-option">
-                  <input type="radio" name="trainingMode" value="i2v" />
-                  <span>Image to Video (I2V)</span>
-                </label>
-              </div>
-            </fieldset>
-          </div>
-          <div class="form-row">
-            <fieldset class="mode-fieldset">
-              <legend>Noise schedule</legend>
-              <div class="mode-options" role="radiogroup" aria-label="Noise schedule">
-                <label class="mode-option">
-                  <input type="radio" name="noiseMode" value="high" />
-                  <span>High Noise Only</span>
-                </label>
-                <label class="mode-option">
-                  <input type="radio" name="noiseMode" value="low" />
-                  <span>Low Noise Only</span>
-                </label>
-                <label class="mode-option">
-                  <input type="radio" name="noiseMode" value="both" checked />
-                  <span>Both (Recommended)</span>
-                </label>
-              </div>
-              <p class="mode-hint">If your instance has 2 GPUs, I can train high noise and low noise simultaneously.</p>
-            </fieldset>
-          </div>
-          <div class="form-row two-col">
-            <label>
               Save every N epochs
               <input type="number" name="saveEvery" min="1" value="20" />
             </label>
-            <label>
-              CPU threads per process (leave blank for auto)
-              <input type="number" name="cpuThreads" min="1" placeholder="Auto" />
-            </label>
-            <label>
-              Max data loader workers (leave blank for auto)
-              <input type="number" name="maxWorkers" min="1" placeholder="Auto" />
-            </label>
           </div>
-          <div class="form-row two-col">
-            <label class="toggle">
-              <input type="checkbox" name="uploadCloud" checked />
-              Upload LoRAs to cloud storage after training
-            </label>
-            <label class="toggle">
-              <input type="checkbox" name="shutdownInstance" checked />
-              Shut down instance after training
-            </label>
-          </div>
-          <div class="form-row">
-            <label class="toggle">
-              <input type="checkbox" name="convertVideos" />
-              Convert dataset videos to 16 FPS before training
-            </label>
-          </div>
-          <div class="form-row">
-            <div class="param-header">
-              <h3 class="param-section-title">Training parameters</h3>
-              <label class="toggle inline">
-                <input type="checkbox" id="splitParamsToggle" />
-                Use different commands for high noise
-              </label>
+          <details class="advanced-settings">
+            <summary>Advanced model parameters</summary>
+            <div class="advanced-content">
+              <div class="form-row">
+                <label>
+                  Dataset config path
+                  <input type="text" name="datasetPath" value="/workspace/musubi-tuner/dataset/dataset.toml" required />
+                </label>
+              </div>
+              <div class="form-row">
+                <label>
+                  Presets
+                  <div class="preset-row">
+                    <select id="presetSelect" aria-label="Preset selector"></select>
+                    <button type="button" id="loadPresetButton" class="button-secondary">Load preset</button>
+                  </div>
+                  <div class="preset-row">
+                    <input
+                      type="text"
+                      id="presetNameInput"
+                      placeholder="Preset name, e.g. /u/AI_Characters"
+                      autocomplete="off"
+                    />
+                    <button type="button" id="savePresetButton">Save current as preset</button>
+                  </div>
+                  <div id="presetMessage" class="status-note" aria-live="polite"></div>
+                </label>
+              </div>
+              <div class="form-row">
+                <fieldset class="mode-fieldset">
+                  <legend>Task</legend>
+                  <div class="mode-options" role="radiogroup" aria-label="Training task">
+                    <label class="mode-option">
+                      <input type="radio" name="trainingMode" value="t2v" checked />
+                      <span>Text to Video (T2V)</span>
+                    </label>
+                    <label class="mode-option">
+                      <input type="radio" name="trainingMode" value="i2v" />
+                      <span>Image to Video (I2V)</span>
+                    </label>
+                  </div>
+                </fieldset>
+              </div>
+              <div class="form-row">
+                <fieldset class="mode-fieldset">
+                  <legend>Noise schedule</legend>
+                  <div class="mode-options" role="radiogroup" aria-label="Noise schedule">
+                    <label class="mode-option">
+                      <input type="radio" name="noiseMode" value="high" />
+                      <span>High Noise Only</span>
+                    </label>
+                    <label class="mode-option">
+                      <input type="radio" name="noiseMode" value="low" />
+                      <span>Low Noise Only</span>
+                    </label>
+                    <label class="mode-option">
+                      <input type="radio" name="noiseMode" value="both" checked />
+                      <span>Both (Recommended)</span>
+                    </label>
+                  </div>
+                  <p class="mode-hint">If your instance has 2 GPUs, I can train high noise and low noise simultaneously.</p>
+                </fieldset>
+              </div>
+              <div class="form-row two-col">
+                <label>
+                  CPU threads per process (leave blank for auto)
+                  <input type="number" name="cpuThreads" min="1" placeholder="Auto" />
+                </label>
+                <label>
+                  Max data loader workers (leave blank for auto)
+                  <input type="number" name="maxWorkers" min="1" placeholder="Auto" />
+                </label>
+              </div>
+              <div class="form-row two-col">
+                <label class="toggle">
+                  <input type="checkbox" name="uploadCloud" checked />
+                  Upload LoRAs to cloud storage after training
+                </label>
+                <label class="toggle">
+                  <input type="checkbox" name="shutdownInstance" checked />
+                  Shut down instance after training
+                </label>
+              </div>
+              <div class="form-row">
+                <label class="toggle">
+                  <input type="checkbox" name="convertVideos" />
+                  Convert dataset videos to 16 FPS before training
+                </label>
+              </div>
+              <div class="form-row">
+                <div class="param-header">
+                  <h3 class="param-section-title">Training parameters</h3>
+                  <label class="toggle inline">
+                    <input type="checkbox" id="splitParamsToggle" />
+                    Use different commands for high noise
+                  </label>
+                </div>
+                <div>
+                  <h4 class="param-section-title">Shared parameters</h4>
+                  <div id="sharedParams" class="param-grid"></div>
+                </div>
+                <div id="perNoiseParams" class="hidden">
+                  <h4 class="param-section-title">High noise overrides</h4>
+                  <div id="highParams" class="param-grid"></div>
+                  <h4 class="param-section-title">Low noise overrides</h4>
+                  <div id="lowParams" class="param-grid"></div>
+                </div>
+              </div>
+              <div id="cloudStatusMessage" class="status-note" aria-live="polite"></div>
             </div>
-            <div>
-              <h4 class="param-section-title">Shared parameters</h4>
-              <div id="sharedParams" class="param-grid"></div>
-            </div>
-            <div id="perNoiseParams" class="hidden">
-              <h4 class="param-section-title">High noise overrides</h4>
-              <div id="highParams" class="param-grid"></div>
-              <h4 class="param-section-title">Low noise overrides</h4>
-              <div id="lowParams" class="param-grid"></div>
-            </div>
-          </div>
-          <div id="cloudStatusMessage" class="status-note" aria-live="polite"></div>
+          </details>
           <div class="form-row">
             <label>
               Vast.ai API key for cloud uploads
@@ -903,6 +947,8 @@
       const apiKeyButton = document.getElementById('saveApiKeyButton');
       const apiKeyMessageEl = document.getElementById('apiKeyMessage');
       let currentCloudStatus = null;
+      const DEFAULT_PRESET_NAME = '/u/ai_characters';
+      let hasLoadedDefaultPreset = false;
       const NO_CAPTION_TEXT = 'No caption file found for this media.';
 
       const MAX_LOG_LINES = 400;
@@ -1603,6 +1649,18 @@
 
       function applyPresetData(data) {
         if (!data) return;
+        const presetName = data.name || '';
+        if (presetSelect && presetName) {
+          const match = Array.from(presetSelect.options || []).find(
+            (option) => option.value.toLowerCase() === presetName.toLowerCase(),
+          );
+          if (match) {
+            presetSelect.value = match.value;
+          }
+        }
+        if (presetNameInput && presetName) {
+          presetNameInput.value = presetName;
+        }
         const mode = (data.training_mode || 't2v').toLowerCase();
         const defaults = buildDefaultParams(mode);
         const trainParams = data.train_params || {};
@@ -1623,6 +1681,13 @@
         const datasetInput = form.querySelector('input[name="datasetPath"]');
         if (datasetInput && data.dataset_path) {
           datasetInput.value = data.dataset_path;
+        }
+
+        const saveInput = form.querySelector('input[name="saveEvery"]');
+        const presetSaveValue =
+          data.save_every ?? (trainParams.shared && trainParams.shared.save_every_n_epochs);
+        if (saveInput && presetSaveValue != null) {
+          saveInput.value = presetSaveValue;
         }
 
         const titleInput = form.querySelector('input[name="titleSuffix"]');
@@ -1659,6 +1724,7 @@
         placeholder.value = '';
         placeholder.textContent = 'Select a preset';
         presetSelect.appendChild(placeholder);
+        let defaultPresetMatch = null;
         try {
           const response = await fetch('/presets');
           if (!response.ok) {
@@ -1670,7 +1736,28 @@
             option.value = name;
             option.textContent = name;
             presetSelect.appendChild(option);
+            if (!defaultPresetMatch && name.toLowerCase() === DEFAULT_PRESET_NAME.toLowerCase()) {
+              defaultPresetMatch = name;
+            }
           });
+          if (!hasLoadedDefaultPreset) {
+            const targetPreset = defaultPresetMatch || DEFAULT_PRESET_NAME;
+            if (targetPreset) {
+              const matchingOption = Array.from(presetSelect.options || []).find(
+                (option) => option.value.toLowerCase() === targetPreset.toLowerCase(),
+              );
+              if (matchingOption) {
+                presetSelect.value = matchingOption.value;
+                if (presetNameInput) {
+                  presetNameInput.value = matchingOption.value;
+                }
+              } else if (presetNameInput) {
+                presetNameInput.value = targetPreset;
+              }
+              await loadPresetByName(targetPreset);
+            }
+            hasLoadedDefaultPreset = true;
+          }
         } catch (error) {
           setPresetMessage(error?.message || 'Failed to load presets.', true);
         }
@@ -1681,6 +1768,17 @@
         if (!normalized) {
           setPresetMessage('Pick a preset to load.');
           return;
+        }
+        if (presetSelect) {
+          const match = Array.from(presetSelect.options || []).find(
+            (option) => option.value.toLowerCase() === normalized.toLowerCase(),
+          );
+          if (match) {
+            presetSelect.value = match.value;
+          }
+        }
+        if (presetNameInput) {
+          presetNameInput.value = normalized;
         }
         setPresetMessage('Loading preset…');
         const safeName = normalized.replace(/^\//, '');
