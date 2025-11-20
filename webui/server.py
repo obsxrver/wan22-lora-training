@@ -8,6 +8,7 @@ import shutil
 import signal
 import subprocess
 import tempfile
+from urllib.parse import unquote
 from collections import deque
 from pathlib import Path
 from typing import Any, Dict, FrozenSet, Iterable, List, Optional, Set, Tuple
@@ -204,7 +205,7 @@ def maybe_set_container_api_key() -> None:
 
 
 def _normalize_preset_name(name: str) -> str:
-    normalized = name.strip().replace("\\", "/").strip("/")
+    normalized = unquote(name.strip()).replace("\\", "/").strip("/")
     parts = [part for part in normalized.split("/") if part not in {"", ".", ".."}]
     return "/".join(parts)
 
