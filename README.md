@@ -66,19 +66,19 @@ Click **"Start training"**. The WebUI will:
 This tool can automatically upload your trained LoRAs to Google Drive, Dropbox, or R2/S3 immediately after training finishes.
 
 ### 1. Configure Cloud Connection
-Before training, you must link your cloud storage to your Vast.AI account:
-1.  Go to [Vast.AI Cloud Data](https://cloud.vast.ai/data/).
+Before training, you can link your cloud storage to your Vast.AI account for automatic file upload:
+1.  Go to [Vast.AI Settings, Cloud Connection](https://cloud.vast.ai/settings/).
 2.  Click **"New Connection"**.
 3.  Select your provider (Google Drive, Dropbox, etc.) and follow the authentication steps.
 4.  Name the connection (e.g., `mydrive`).
 
-### 2. Add API Key to WebUI
-For the WebUI to access this connection, it needs your Vast.AI API Key:
+### Add API Key to WebUI
+For the WebUI to access your cloud connection, it needs your Vast.AI API Key:
 1.  Go to your [Vast.AI API Keys](https://cloud.vast.ai/manage-keys) page.
 2.  Copy your API key.
 3.  In the WebUI, under "Configure training", paste the key into the **"Vast.AI API key"** field and click **"Save key"**.
 
-Once configured, ensure the **"Upload LoRAs to cloud storage"** checkbox is selected. Your training results will be zipped and pushed to your cloud storage automatically.
+Once configured, ensure the **"Upload LoRAs to cloud storage"** checkbox is selected. Your training results will be pushed to your cloud storage automatically.
 
 ## Advanced Usage
 
