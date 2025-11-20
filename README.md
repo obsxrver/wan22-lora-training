@@ -89,5 +89,5 @@ If you prefer the terminal, the WebUI runs on top of standard scripts located in
 
 ## Credits
 - WebUI & Automation by [obsxrver](https://github.com/obsxrver)
-- Training backend based on [musubi-tuner](https://github.com/kohya-ss/musubi-tuner)
+- Training backend based on [musubi-tuner](https://github.com/kohya-ss/musubi-tuner) by the one and only kohya-ss
 - Original workflow guide by [AI_Characters](https://civitai.com/user/AI_Characters)
