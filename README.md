@@ -63,7 +63,7 @@ Click **"Start training"**. The WebUI will:
 
 ## Cloud Backup & Sync
 
-This tool can automatically upload your trained LoRAs to Google Drive, Dropbox, or R2/S3 immediately after training finishes.
+This tool can automatically upload your trained LoRAs to Google Drive, Dropbox, Blackblaze, or Amazon/S3 immediately after training finishes.
 
 ### 1. Configure Cloud Connection
 Before training, you can link your cloud storage to your Vast.AI account for automatic file upload:
