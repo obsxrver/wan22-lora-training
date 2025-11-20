@@ -22,6 +22,9 @@ cd /workspace
 if [[ ! -d wan22-lora-training ]]; then
   git clone https://github.com/obsxrver/wan22-lora-training.git
 fi
+if [[ -n "${DEV:-}" ]]; then
+  git checkout dev
+fi
 if [[ ! -d musubi-tuner ]]; then
   git clone --recursive https://github.com/kohya-ss/musubi-tuner.git
 fi
