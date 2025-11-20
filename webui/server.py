@@ -235,7 +235,13 @@ def _load_preset(name: str) -> Dict[str, Any]:
     preset_path = _preset_json_path(name)
     with preset_path.open("r", encoding="utf-8") as handle:
         return json.load(handle)
-        
+
+
+class TrainParams(BaseModel):
+    shared: Dict[str, Any] = Field(default_factory=dict)
+    high: Dict[str, Any] = Field(default_factory=dict)
+    low: Dict[str, Any] = Field(default_factory=dict)
+    split_commands: bool = False
 class TrainRequest(BaseModel):
     title_suffix: str = Field(default="mylora", min_length=1)
     author: str = Field(default="authorName", min_length=1)
@@ -623,12 +629,6 @@ class UpdateCaptionRequest(BaseModel):
     caption_text: Optional[str] = None
     caption_path: Optional[str] = None
 
-
-class TrainParams(BaseModel):
-    shared: Dict[str, Any] = Field(default_factory=dict)
-    high: Dict[str, Any] = Field(default_factory=dict)
-    low: Dict[str, Any] = Field(default_factory=dict)
-    split_commands: bool = False
 
 
 
