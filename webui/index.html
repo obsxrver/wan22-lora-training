@@ -1678,9 +1678,9 @@
         const mode = (data.training_mode || 't2v').toLowerCase();
         const defaults = buildDefaultParams(mode);
         const trainParams = data.train_params || {};
-        const sharedParams = { ...defaults.shared, ...(trainParams.shared || {}) };
-        const highParams = { ...defaults.high, ...(trainParams.high || {}) };
-        const lowParams = { ...defaults.low, ...(trainParams.low || {}) };
+        const sharedParams = trainParams.shared || {};
+        const highParams = trainParams.high || {};
+        const lowParams = trainParams.low || {};
 
         renderParams(sharedParamsContainer, sharedParams);
         renderParams(highParamsContainer, highParams);
@@ -1693,25 +1693,25 @@
         setSplitParamsUI(splitCommands);
 
         const datasetInput = form.querySelector('input[name="datasetPath"]');
-        if (datasetInput && data.dataset_path) {
-          datasetInput.value = data.dataset_path;
+        if (datasetInput) {
+          datasetInput.value = data.dataset_path || '/workspace/musubi-tuner/dataset/dataset.toml';
         }
 
         const saveInput = form.querySelector('input[name="saveEvery"]');
         const presetSaveValue =
           data.save_every ?? (trainParams.shared && trainParams.shared.save_every_n_epochs);
-        if (saveInput && presetSaveValue != null) {
-          saveInput.value = presetSaveValue;
+        if (saveInput) {
+          saveInput.value = presetSaveValue != null ? presetSaveValue : 20;
         }
 
         const titleInput = form.querySelector('input[name="titleSuffix"]');
-        if (titleInput && data.title_suffix) {
-          titleInput.value = data.title_suffix;
+        if (titleInput) {
+          titleInput.value = data.title_suffix || 'mylora';
         }
 
         const authorInput = form.querySelector('input[name="author"]');
-        if (authorInput && data.author) {
-          authorInput.value = data.author;
+        if (authorInput) {
+          authorInput.value = data.author || 'authorName';
         }
 
         const convertCheckbox = form.querySelector('input[name="convertVideos"]');

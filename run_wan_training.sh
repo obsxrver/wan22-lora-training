@@ -687,6 +687,7 @@ main() {
   local TRAIN_TASK
   local HIGH_TITLE
   local LOW_TITLE
+  local COMBINED_TITLE
   local -a CACHE_LATENTS_ARGS=()
   local noise_mode="$NOISE_MODE_INPUT"
   local RUN_HIGH=1
@@ -740,6 +741,7 @@ main() {
       LOW_DIT="$T2V_LOW_DIT"
       HIGH_TITLE="WAN2.2-T2V-HighNoise_${TITLE_SUFFIX}"
       LOW_TITLE="WAN2.2-T2V-LowNoise_${TITLE_SUFFIX}"
+      COMBINED_TITLE="WAN2.2-T2V-Combined_${TITLE_SUFFIX}"
       ;;
     i2v)
       TRAIN_TASK="i2v-A14B"
@@ -747,6 +749,7 @@ main() {
       LOW_DIT="$I2V_LOW_DIT"
       HIGH_TITLE="WAN2.2-I2V-HighNoise_${TITLE_SUFFIX}"
       LOW_TITLE="WAN2.2-I2V-LowNoise_${TITLE_SUFFIX}"
+      COMBINED_TITLE="WAN2.2-I2V-Combined_${TITLE_SUFFIX}"
       CACHE_LATENTS_ARGS+=(--i2v)
       ;;
     *)
@@ -898,6 +901,11 @@ main() {
     echo "  Low title:  $LOW_TITLE"
   else
     echo "  Low noise:  disabled"
+  fi
+  if (( RUN_COMBINED )); then
+    echo "  Combined title: $COMBINED_TITLE"
+  else
+    echo "  Combined:   disabled"
   fi
   echo "  Author:     $AUTHOR"
   echo "  Save every: $SAVE_EVERY epochs"
@@ -1112,7 +1120,7 @@ main() {
     local -a COMBINED_TRAIN_ARGS=()
     if [[ -n "$TRAIN_PARAMS_PATH" ]]; then
       # pass LOW_DIT as default dit, but we will likely override it or use dit_high_noise
-      build_custom_train_args "combined" "$HIGH_TITLE" "$LOW_DIT" 0 1000 "$DEFAULT_OUTPUT_DIR"
+      build_custom_train_args "combined" "$COMBINED_TITLE" "$LOW_DIT" 0 1000 "$DEFAULT_OUTPUT_DIR"
       COMBINED_TRAIN_ARGS=("${CUSTOM_TRAIN_ARGS[@]}")
     else
       # Default arguments for combined mode if no params file
@@ -1145,8 +1153,8 @@ main() {
         --lr_scheduler_power 8
         --lr_scheduler_min_lr_ratio=5e-5
         --output_dir "$DEFAULT_OUTPUT_DIR"
-        --output_name "$HIGH_TITLE"
-        --metadata_title "$HIGH_TITLE"
+        --output_name "$COMBINED_TITLE"
+        --metadata_title "$COMBINED_TITLE"
         --metadata_author "$AUTHOR"
         --preserve_distribution_shape
         --min_timestep 0
