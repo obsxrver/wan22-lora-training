@@ -454,6 +454,15 @@
         margin-top: 0.75rem;
         display: grid;
         gap: 1rem;
+        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      }
+
+      .advanced-content .form-row,
+      .advanced-content fieldset {
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 0.85rem;
+        background: rgba(255, 255, 255, 0.02);
       }
 
       label {
@@ -753,7 +762,7 @@
                     <input
                       type="text"
                       id="presetNameInput"
-                      placeholder="Preset name, e.g. /u/AI_Characters"
+                      placeholder="Preset name, e.g. /AI_Characters"
                       autocomplete="off"
                     />
                     <button type="button" id="savePresetButton">Save current as preset</button>
@@ -792,8 +801,12 @@
                       <input type="radio" name="noiseMode" value="both" checked />
                       <span>Both (Recommended)</span>
                     </label>
+                    <label class="mode-option">
+                      <input type="radio" name="noiseMode" value="combined" />
+                      <span>Combined (one model)</span>
+                    </label>
                   </div>
-                  <p class="mode-hint">If your instance has 2 GPUs, I can train high noise and low noise simultaneously.</p>
+                  <p class="mode-hint">If your instance has 2 GPUs, I can train high noise and low noise simultaneously. Use combined to train one model across all timesteps.</p>
                 </fieldset>
               </div>
               <div class="form-row two-col">
@@ -930,6 +943,7 @@
       const highEtaEl = document.getElementById('highEta');
       const highStatusEl = document.getElementById('highStatus');
       const highCardEl = document.getElementById('highMetrics');
+      const highTitleEl = highCardEl ? highCardEl.querySelector('h3') : null;
       const lowStepEl = document.getElementById('lowStep');
       const lowLossEl = document.getElementById('lowLoss');
       const lowEpochEl = document.getElementById('lowEpoch');
@@ -938,6 +952,7 @@
       const lowEtaEl = document.getElementById('lowEta');
       const lowStatusEl = document.getElementById('lowStatus');
       const lowCardEl = document.getElementById('lowMetrics');
+      const lowTitleEl = lowCardEl ? lowCardEl.querySelector('h3') : null;
       const stopButton = document.getElementById('stopButton');
       const logOutput = document.getElementById('logOutput');
       const uploadCloudCheckbox = form.querySelector('input[name="uploadCloud"]');
@@ -947,13 +962,14 @@
       const apiKeyButton = document.getElementById('saveApiKeyButton');
       const apiKeyMessageEl = document.getElementById('apiKeyMessage');
       let currentCloudStatus = null;
-      const DEFAULT_PRESET_NAME = '/u/ai_characters';
+      const DEFAULT_PRESET_NAME = '/AI_Characters';
       let hasLoadedDefaultPreset = false;
       const NO_CAPTION_TEXT = 'No caption file found for this media.';
 
       const MAX_LOG_LINES = 400;
       const logLines = [];
       const VIDEO_EXTENSION_PATTERN = /\.(mp4|mov|avi|mkv|webm|mpg|mpeg)$/i;
+      let currentNoiseMode = 'both';
       const DEFAULT_PATHS = {
         vae: '/workspace/musubi-tuner/models/vae/split_files/vae/wan_2.1_vae.safetensors',
         t5: '/workspace/musubi-tuner/models/text_encoders/models_t5_umt5-xxl-enc-bf16.pth',
@@ -961,7 +977,6 @@
         t2vLow: '/workspace/musubi-tuner/models/diffusion_models/split_files/diffusion_models/wan2.2_t2v_low_noise_14B_fp16.safetensors',
         i2vHigh: '/workspace/musubi-tuner/models/diffusion_models/split_files/diffusion_models/wan2.2_i2v_high_noise_14B_fp16.safetensors',
         i2vLow: '/workspace/musubi-tuner/models/diffusion_models/split_files/diffusion_models/wan2.2_i2v_low_noise_14B_fp16.safetensors',
-        outputDir: '/workspace/musubi-tuner/output',
       };
 
       const PARAM_DEFINITIONS = [
@@ -985,7 +1000,6 @@
         { key: 'timestep_sampling', label: 'Timestep sampling', type: 'text' },
         { key: 'discrete_flow_shift', label: 'Discrete flow shift', type: 'number' },
         { key: 'max_train_epochs', label: 'Max train epochs', type: 'number' },
-        { key: 'save_every_n_epochs', label: 'Save every n epochs', type: 'number' },
         { key: 'seed', label: 'Seed', type: 'number' },
         { key: 'optimizer_args', label: 'Optimizer args', type: 'text' },
         { key: 'max_grad_norm', label: 'Max grad norm', type: 'number' },
@@ -993,16 +1007,12 @@
         { key: 'lr_scheduler_power', label: 'LR scheduler power', type: 'number' },
         { key: 'lr_scheduler_min_lr_ratio', label: 'LR min lr ratio', type: 'number' },
         { key: 'lr_warmup_steps', label: 'LR warmup steps', type: 'number' },
-        { key: 'output_dir', label: 'Output dir', type: 'text' },
         { key: 'output_name', label: 'Output name', type: 'text' },
         { key: 'metadata_title', label: 'Metadata title', type: 'text' },
-        { key: 'metadata_author', label: 'Metadata author', type: 'text' },
         { key: 'preserve_distribution_shape', label: 'Preserve distribution shape', type: 'checkbox' },
         { key: 'min_timestep', label: 'Min timestep', type: 'number' },
         { key: 'max_timestep', label: 'Max timestep', type: 'number' },
         { key: 'img_in_txt_in_offloading', label: 'img_in_txt_in_offloading', type: 'checkbox' },
-        { key: 'log_with', label: 'Log with', type: 'text' },
-        { key: 'logging_dir', label: 'Logging dir', type: 'text' },
         { key: 'offload_inactive_dit', label: 'Offload inactive DiT', type: 'checkbox' },
         { key: 'persistent_data_loader_workers', label: 'Persistent data loader workers', type: 'checkbox' },
         { key: 'timestep_boundary', label: 'Timestep boundary', type: 'number' },
@@ -1032,15 +1042,12 @@
           timestep_sampling: 'shift',
           discrete_flow_shift: 1,
           max_train_epochs: 100,
-          save_every_n_epochs: 20,
           seed: 5,
           optimizer_args: 'weight_decay=0.1',
           max_grad_norm: 0,
           lr_scheduler: 'polynomial',
           lr_scheduler_power: 8,
           lr_scheduler_min_lr_ratio: 0.00005,
-          output_dir: DEFAULT_PATHS.outputDir,
-          metadata_author: 'authorName',
           preserve_distribution_shape: true,
           sdpa: true,
         };
@@ -1684,8 +1691,7 @@
         }
 
         const saveInput = form.querySelector('input[name="saveEvery"]');
-        const presetSaveValue =
-          data.save_every ?? (trainParams.shared && trainParams.shared.save_every_n_epochs);
+        const presetSaveValue = data.save_every;
         if (saveInput && presetSaveValue != null) {
           saveInput.value = presetSaveValue;
         }
@@ -1715,6 +1721,16 @@
         if (noiseInput) {
           noiseInput.checked = true;
         }
+        currentNoiseMode = noiseMode;
+        const presetRuns =
+          noiseMode === 'high'
+            ? ['high']
+            : noiseMode === 'low'
+              ? ['low']
+              : noiseMode === 'combined'
+                ? ['high']
+                : ['high', 'low'];
+        updateActiveRuns(presetRuns);
       }
 
       async function refreshPresetOptions() {
@@ -1798,7 +1814,7 @@
       async function saveCurrentPreset() {
         const name = (presetNameInput?.value || '').trim();
         if (!name) {
-          setPresetMessage('Enter a preset name, e.g. /u/AI_Characters.', true);
+          setPresetMessage('Enter a preset name, e.g. /AI_Characters.', true);
           return;
         }
 
@@ -1821,6 +1837,7 @@
           train_params: buildTrainingParamsPayload(splitCommands),
           title_suffix: form.querySelector('input[name="titleSuffix"]')?.value || undefined,
           author: form.querySelector('input[name="author"]')?.value || undefined,
+          save_every: Number(form.querySelector('input[name="saveEvery"]')?.value || '') || undefined,
         };
 
         setPresetMessage('Saving preset…');
@@ -1959,11 +1976,30 @@
         }
       }
 
+      function refreshNoiseLabels() {
+        if (highTitleEl) {
+          highTitleEl.textContent = currentNoiseMode === 'combined' ? 'Combined noise' : 'High noise';
+        }
+        if (lowTitleEl) {
+          lowTitleEl.textContent = currentNoiseMode === 'combined' ? 'Low noise (not used)' : 'Low noise';
+        }
+        if (chart && chart.data && Array.isArray(chart.data.datasets)) {
+          const [highDataset, lowDataset] = chart.data.datasets;
+          if (highDataset) {
+            highDataset.label = currentNoiseMode === 'combined' ? 'Combined noise loss' : 'High noise loss';
+          }
+          if (lowDataset) {
+            lowDataset.label = 'Low noise loss';
+          }
+          chart.update('none');
+        }
+      }
+
       function updateActiveRuns(runs) {
         const normalized = Array.isArray(runs)
           ? runs
               .map((run) => {
-                if (run === 'high' || run === 'low') {
+                if (run === 'high' || run === 'low' || run === 'combined') {
                   return run;
                 }
                 return null;
@@ -1974,9 +2010,17 @@
           normalized.push('high', 'low');
         }
         activeRuns = new Set(normalized);
+        if (currentNoiseMode === 'combined') {
+          activeRuns = new Set(['high']);
+        }
         ['high', 'low'].forEach((run) => {
           const isActive = activeRuns.has(run);
-          const statusText = isActive ? '' : 'Disabled in configuration.';
+          const statusText =
+            currentNoiseMode === 'combined' && run === 'low'
+              ? 'Combined mode trains one model for high + low noise.'
+              : isActive
+                ? ''
+                : 'Disabled in configuration.';
           setRunState(run, isActive, statusText);
         });
         if (chart && chart.data && Array.isArray(chart.data.datasets)) {
@@ -1989,6 +2033,7 @@
           }
           chart.update('none');
         }
+        refreshNoiseLabels();
       }
 
       noiseModeInputs.forEach((input) => {
@@ -1997,7 +2042,15 @@
             return;
           }
           const value = (input.value || '').toLowerCase();
-          const runs = value === 'high' ? ['high'] : value === 'low' ? ['low'] : ['high', 'low'];
+          currentNoiseMode = value === 'combined' ? 'combined' : value === 'high' ? 'high' : value === 'low' ? 'low' : 'both';
+          const runs =
+            currentNoiseMode === 'high'
+              ? ['high']
+              : currentNoiseMode === 'low'
+                ? ['low']
+                : currentNoiseMode === 'combined'
+                  ? ['high']
+                  : ['high', 'low'];
           updateActiveRuns(runs);
         });
       });
@@ -2122,10 +2175,7 @@
         chart.update('none');
         updateRunDisplay('high', null);
         updateRunDisplay('low', null);
-        ['high', 'low'].forEach((run) => {
-          const isActive = activeRuns.has(run);
-          setRunState(run, isActive, isActive ? '' : 'Disabled in configuration.');
-        });
+        updateActiveRuns([...activeRuns]);
         logLines.length = 0;
         logOutput.textContent = 'Waiting for training output…';
         stopButton.disabled = true;
@@ -2313,7 +2363,9 @@
             noiseInput.checked = true;
           }
         }
+        currentNoiseMode = snapshot.noise_mode || 'both';
         updateActiveRuns(Array.isArray(snapshot.active_runs) ? snapshot.active_runs : ['high', 'low']);
+        refreshNoiseLabels();
         applyHistory(0, snapshot.high?.history || []);
         applyHistory(1, snapshot.low?.history || []);
         updateRunDisplay('high', snapshot.high?.current || null);
@@ -2335,8 +2387,17 @@
         const trainingModeRaw = (formData.get('trainingMode') || 't2v').toString().toLowerCase();
         const trainingMode = trainingModeRaw === 'i2v' ? 'i2v' : 't2v';
         const noiseModeRaw = (formData.get('noiseMode') || 'both').toString().toLowerCase();
-        const noiseMode = noiseModeRaw === 'high' || noiseModeRaw === 'low' ? noiseModeRaw : 'both';
-        const selectedRuns = noiseMode === 'high' ? ['high'] : noiseMode === 'low' ? ['low'] : ['high', 'low'];
+        const noiseMode =
+          noiseModeRaw === 'high' || noiseModeRaw === 'low' || noiseModeRaw === 'combined' ? noiseModeRaw : 'both';
+        currentNoiseMode = noiseMode;
+        const selectedRuns =
+          noiseMode === 'high'
+            ? ['high']
+            : noiseMode === 'low'
+              ? ['low']
+              : noiseMode === 'combined'
+                ? ['high']
+                : ['high', 'low'];
         const splitCommands = splitParamsToggle?.checked || false;
         const trainParams = buildTrainingParamsPayload(splitCommands);
         const payload = {
@@ -2354,8 +2415,6 @@
           noise_mode: noiseMode,
           train_params: trainParams,
         };
-
-        trainParams.shared.save_every_n_epochs = payload.save_every;
 
         if (currentCloudStatus && !currentCloudStatus.can_upload) {
           payload.upload_cloud = false;
