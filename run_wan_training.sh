@@ -311,9 +311,6 @@ for key, value in run_config.items():
     else:
         args.extend([f"--{key}", str(value)])
 
-if attn_flags.strip():
-    args.extend(shlex.split(attn_flags))
-
 print("\n".join(args))
 PY
   )
