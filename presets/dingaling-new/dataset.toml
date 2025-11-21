@@ -1,0 +1,24 @@
+[general]
+
+caption_extension = ".txt"
+batch_size = 1
+enable_bucket = true 
+bucket_no_upscale = false
+
+
+[[datasets]]
+
+image_directory = "\workspace\musubi-tuner\dataset"
+cache_directory = "\workspace\musubi-tuner\dataset\cache"
+num_repeats = 1
+resolution = [256,256]
+
+
+[[datasets]]
+
+video_directory = "\workspace\musubi-tuner\dataset"
+cache_directory = "\workspace\musubi-tuner\dataset\videocache"
+num_repeats = 1
+resolution = [176,176]
+frame_extraction = "full"
+max_frames = 17
