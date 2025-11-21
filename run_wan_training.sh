@@ -1163,6 +1163,9 @@ main() {
         --offload_inactive_dit
       )
     fi
+    #read out training args 
+    echo "Combined training args:"
+    echo "${COMBINED_TRAIN_ARGS[@]}"
     MASTER_ADDR=127.0.0.1 MASTER_PORT="$COMBINED_PORT" CUDA_VISIBLE_DEVICES="$COMBINED_GPU" \
     "$ACCELERATE" launch --num_cpu_threads_per_process "$CPU_THREADS_PER_PROCESS" --num_processes 1 --main_process_port "$COMBINED_PORT" src/musubi_tuner/wan_train_network.py \
       "${COMBINED_TRAIN_ARGS[@]}" \

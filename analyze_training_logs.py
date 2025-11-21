@@ -64,7 +64,7 @@ def smooth_data(data, window=20):
     return smoothed
 
 
-def create_plot(high_data, low_data, output_path):
+def create_plot(high_data, low_data, combined_data, output_path):
     """Create matplotlib plot comparing high and low noise training."""
     fig, ax = plt.subplots(figsize=(14, 7))
     
@@ -90,8 +90,19 @@ def create_plot(high_data, low_data, output_path):
         ax.plot(smooth_steps, smooth_losses, label='Low Noise (smoothed)', 
                 alpha=0.9, linewidth=2, color='#ff7f0e')
     
+    if combined_data:
+        combined_steps, combined_losses = zip(*combined_data)
+        # Raw data with transparency
+        ax.plot(combined_steps, combined_losses, label='Combined Noise (raw)', 
+                alpha=0.3, linewidth=0.8, color='#2ca02c')
+        # Smoothed trend line
+        combined_smooth = smooth_data(combined_data, window=20)
+        smooth_steps, smooth_losses = zip(*combined_smooth)
+        ax.plot(smooth_steps, smooth_losses, label='Combined Noise (smoothed)', 
+                alpha=0.9, linewidth=2, color='#2ca02c')
+    
     ax.set_xlabel('Training Step', fontsize=12)
-    ax.set_ylabel('Average Loss', fontsize=12)
+    ax.set_ylabel('Average Loss', fontsize=12)  
     ax.set_title('WAN2.2 LoRA Training Loss Curves', fontsize=14, fontweight='bold')
     ax.legend(fontsize=10, loc='best')
     ax.grid(True, alpha=0.3)
@@ -113,22 +124,23 @@ def main():
     
     high_log = log_dir / "run_high.log"
     low_log = log_dir / "run_low.log"
+    combined_log = log_dir / "run_combined.log"
     
     print("Analyzing training logs...")
     print(f"  High noise log: {high_log}")
     print(f"  Low noise log: {low_log}")
-    
+    print(f"  Combined noise log: {combined_log}")
     # Parse logs
     high_data = parse_log_file(high_log)
     low_data = parse_log_file(low_log)
-    
-    if not high_data and not low_data:
+    combined_data = parse_log_file(combined_log)
+    if not high_data and not low_data and not combined_data:
         print("Error: No training data found in log files", file=sys.stderr)
         sys.exit(1)
     
     print(f"  Found {len(high_data)} high noise steps")
     print(f"  Found {len(low_data)} low noise steps")
-    
+    print(f"  Found {len(combined_data)} combined noise steps")
     # Create output directory
     output_dir = log_dir / "training_analysis"
     output_dir.mkdir(exist_ok=True)
@@ -138,9 +150,10 @@ def main():
         save_csv(high_data, output_dir / "high_noise_loss.csv")
     if low_data:
         save_csv(low_data, output_dir / "low_noise_loss.csv")
-    
+    if combined_data:
+        save_csv(combined_data, output_dir / "combined_noise_loss.csv")
     # Create plot
-    create_plot(high_data, low_data, output_dir / "training_loss_plot.png")
+    create_plot(high_data, low_data, combined_data, output_dir / "training_loss_plot.png")
     
     # Generate summary statistics
     summary_path = output_dir / "training_summary.txt"
@@ -168,7 +181,15 @@ def main():
             f.write(f"  Min loss: {min(low_losses):.4f}\n")
             f.write(f"  Max loss: {max(low_losses):.4f}\n")
             f.write(f"  Mean loss: {sum(low_losses)/len(low_losses):.4f}\n")
-    
+        if combined_data:
+            combined_losses = [loss for _, loss in combined_data]
+            f.write(f"Combined Noise Training:\n")
+            f.write(f"  Total steps: {len(combined_data)}\n")
+            f.write(f"  Initial loss: {combined_losses[0]:.4f}\n")
+            f.write(f"  Final loss: {combined_losses[-1]:.4f}\n")
+            f.write(f"  Min loss: {min(combined_losses):.4f}\n")
+            f.write(f"  Max loss: {max(combined_losses):.4f}\n")
+            f.write(f"  Mean loss: {sum(combined_losses)/len(combined_losses):.4f}\n")
     print(f"Saved summary: {summary_path}")
     print(f"\n✅ Analysis complete! Results saved to: {output_dir}")
 
