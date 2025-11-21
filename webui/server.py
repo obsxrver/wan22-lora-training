@@ -32,6 +32,7 @@ DATASET_ROOT = Path("/workspace/musubi-tuner/dataset")
 LOG_DIR = Path("/workspace/musubi-tuner")
 HIGH_LOG = LOG_DIR / "run_high.log"
 LOW_LOG = LOG_DIR / "run_low.log"
+COMBINED_LOG = LOG_DIR / "run_combined.log"
 API_KEY_CONFIG_PATH = Path.home() / ".config" / "vastai" / "vast_api_key"
 PRESET_ROOT = Path("presets")
 MANAGE_KEYS_URL = "https://cloud.vast.ai/manage-keys"
@@ -254,7 +255,7 @@ class TrainRequest(BaseModel):
     shutdown_instance: bool = True
     auto_confirm: bool = True
     training_mode: Literal["t2v", "i2v"] = "t2v"
-    noise_mode: Literal["both", "high", "low"] = "both"
+    noise_mode: Literal["both", "high", "low", "combined"] = "both"
     convert_videos_to_16fps: bool = False
     train_params: Optional["TrainParams"] = None
     preset_name: Optional[str] = None
@@ -263,11 +264,12 @@ class PresetPayload(BaseModel):
     name: str = Field(min_length=1)
     dataset_path: str = Field(min_length=1)
     training_mode: Literal["t2v", "i2v"] = "t2v"
-    noise_mode: Literal["both", "high", "low"] = "both"
+    noise_mode: Literal["both", "high", "low", "combined"] = "both"
     convert_videos_to_16fps: bool = False
     train_params: Optional[TrainParams] = None
     title_suffix: Optional[str] = None
     author: Optional[str] = None
+    save_every: Optional[int] = Field(default=None, ge=1)
 
 
 def _save_preset(payload: PresetPayload) -> Dict[str, Any]:
@@ -292,6 +294,7 @@ def _save_preset(payload: PresetPayload) -> Dict[str, Any]:
         "train_params": payload.train_params.dict() if payload.train_params else {},
         "title_suffix": payload.title_suffix,
         "author": payload.author,
+        "save_every": payload.save_every,
     }
 
     try:
@@ -1443,7 +1446,7 @@ async def start_training(payload: TrainRequest) -> Dict:
     if training_state.running:
         raise HTTPException(status_code=409, detail="Training already in progress")
 
-    for log_path in (HIGH_LOG, LOW_LOG):
+    for log_path in (HIGH_LOG, LOW_LOG, COMBINED_LOG):
         try:
             log_path.unlink()
         except FileNotFoundError:
@@ -1477,6 +1480,8 @@ async def start_training(payload: TrainRequest) -> Dict:
         active_runs: Set[str] = {"high"}
     elif noise_mode == "low":
         active_runs = {"low"}
+    elif noise_mode == "combined":
+        active_runs = {"high"}
     else:
         active_runs = {"high", "low"}
     train_params_path = _write_train_params(payload, dataset_config_path)
@@ -1501,8 +1506,10 @@ async def start_training(payload: TrainRequest) -> Dict:
     disabled_messages = []
     if "high" not in active_runs:
         disabled_messages.append("High noise training disabled by configuration.")
-    if "low" not in active_runs:
+    if "low" not in active_runs and noise_mode != "combined":
         disabled_messages.append("Low noise training disabled by configuration.")
+    if noise_mode == "combined":
+        disabled_messages.append("Using combined noise training (single model across all timesteps).")
     for message in disabled_messages:
         training_state.append_log(message)
         await event_manager.publish({"type": "log", "line": message})
@@ -1513,8 +1520,9 @@ async def start_training(payload: TrainRequest) -> Dict:
     stdout_task = asyncio.create_task(stream_process_output(process))
     training_state.add_task(stdout_task)
 
+    high_log_path = COMBINED_LOG if noise_mode == "combined" else HIGH_LOG
     if "high" in active_runs:
-        high_task = asyncio.create_task(monitor_log_file(HIGH_LOG, "high"))
+        high_task = asyncio.create_task(monitor_log_file(high_log_path, "high"))
         training_state.add_task(high_task)
     if "low" in active_runs:
         low_task = asyncio.create_task(monitor_log_file(LOW_LOG, "low"))

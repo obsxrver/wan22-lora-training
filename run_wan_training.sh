@@ -52,7 +52,8 @@ Optional arguments (all fall back to interactive prompts when omitted):
   --upload-cloud [Y|N]             Upload outputs to configured cloud storage
   --shutdown-instance [Y|N]        Shut down Vast.ai instance after training
   --mode [t2v|i2v]                 Select the training task (text-to-video or image-to-video)
-  --noise-mode [both|high|low]     Choose whether to train high noise, low noise, or both
+  --noise-mode [both|high|low|combined]
+                                   Choose whether to train high noise, low noise, both, or a combined model
   --auto-confirm                   Skip the final confirmation prompt
   --train-params PATH              JSON file with training argument presets
   --help                           Show this message and exit
@@ -238,6 +239,8 @@ build_custom_train_args() {
   local min_ts="$4"
   local max_ts="$5"
   local default_output_dir="$6"
+  local default_high_dit="${7:-}"
+  local save_every_value="${8:-$SAVE_EVERY}"
 
   if [[ -z "$TRAIN_PARAMS_PATH" ]]; then
     return 0
@@ -248,13 +251,13 @@ build_custom_train_args() {
     exit 1
   fi
 
-  mapfile -t CUSTOM_TRAIN_ARGS < <(python3 - "$TRAIN_PARAMS_PATH" "$noise" "$output_name" "$DATASET" "$AUTHOR" "$default_dit" "$VAE" "$T5" "$TRAIN_TASK" "$ATTN_FLAGS" "$min_ts" "$max_ts" "$default_output_dir" <<'PY'
+  mapfile -t CUSTOM_TRAIN_ARGS < <(python3 - "$TRAIN_PARAMS_PATH" "$noise" "$output_name" "$DATASET" "$AUTHOR" "$default_dit" "$VAE" "$T5" "$TRAIN_TASK" "$ATTN_FLAGS" "$min_ts" "$max_ts" "$default_output_dir" "$default_high_dit" "$save_every_value" <<'PY'
 import json
 import shlex
 import sys
 from pathlib import Path
 
-path, noise, output_name, dataset, author, default_dit, vae, t5, task, attn_flags, min_ts, max_ts, output_dir = sys.argv[1:]
+path, noise, output_name, dataset, author, default_dit, vae, t5, task, attn_flags, min_ts, max_ts, output_dir, default_high_dit, save_every = sys.argv[1:]
 
 with open(path, "r", encoding="utf-8") as handle:
     data = json.load(handle)
@@ -277,7 +280,6 @@ defaults = {
     "dataset_config": dataset,
     "output_name": output_name,
     "metadata_title": output_name,
-    "metadata_author": author,
     "dit": default_dit,
     "vae": vae,
     "t5": t5,
@@ -285,7 +287,16 @@ defaults = {
     "min_timestep": float(min_ts),
     "max_timestep": float(max_ts),
     "output_dir": output_dir,
+    "metadata_author": author,
+    "save_every_n_epochs": float(save_every),
 }
+
+if default_high_dit:
+    defaults["dit_high_noise"] = default_high_dit
+
+if noise == "combined":
+    defaults.setdefault("timestep_boundary", 875)
+    defaults.setdefault("offload_inactive_dit", True)
 
 for key, value in defaults.items():
     run_config.setdefault(key, value)
@@ -682,17 +693,19 @@ main() {
   local TRAIN_TASK
   local HIGH_TITLE
   local LOW_TITLE
+  local COMBINED_TITLE
   local -a CACHE_LATENTS_ARGS=()
   local noise_mode="$NOISE_MODE_INPUT"
   local RUN_HIGH=1
   local RUN_LOW=1
+  local RUN_COMBINED=0
 
   if [[ -z "${noise_mode:-}" ]]; then
     if (( AUTO_CONFIRM )); then
       noise_mode="both"
       echo "Noise selection (auto default): $noise_mode"
     else
-      read -r -p "Noise selection (high/low/both, default: both): " noise_mode || true
+      read -r -p "Noise selection (high/low/both/combined, default: both): " noise_mode || true
     fi
   else
     echo "Noise selection (auto): $noise_mode"
@@ -713,8 +726,13 @@ main() {
       RUN_HIGH=0
       RUN_LOW=1
       ;;
+    combined)
+      RUN_HIGH=0
+      RUN_LOW=0
+      RUN_COMBINED=1
+      ;;
     *)
-      echo "Invalid noise selection: $noise_mode. Use 'high', 'low', or 'both'." >&2
+      echo "Invalid noise selection: $noise_mode. Use 'high', 'low', 'combined', or 'both'." >&2
       exit 1
       ;;
   esac
@@ -726,6 +744,7 @@ main() {
       LOW_DIT="$T2V_LOW_DIT"
       HIGH_TITLE="WAN2.2-T2V-HighNoise_${TITLE_SUFFIX}"
       LOW_TITLE="WAN2.2-T2V-LowNoise_${TITLE_SUFFIX}"
+      COMBINED_TITLE="WAN2.2-T2V-CombinedNoise_${TITLE_SUFFIX}"
       ;;
     i2v)
       TRAIN_TASK="i2v-A14B"
@@ -733,6 +752,7 @@ main() {
       LOW_DIT="$I2V_LOW_DIT"
       HIGH_TITLE="WAN2.2-I2V-HighNoise_${TITLE_SUFFIX}"
       LOW_TITLE="WAN2.2-I2V-LowNoise_${TITLE_SUFFIX}"
+      COMBINED_TITLE="WAN2.2-I2V-CombinedNoise_${TITLE_SUFFIX}"
       CACHE_LATENTS_ARGS+=(--i2v)
       ;;
     *)
@@ -875,15 +895,19 @@ main() {
   UPLOAD_CLOUD=$(normalize_yes_no "$UPLOAD_CLOUD")
   SHUTDOWN_INSTANCE=$(normalize_yes_no "$SHUTDOWN_INSTANCE")
   echo "  Dataset: $DATASET"
-  if (( RUN_HIGH )); then
-    echo "  High title: $HIGH_TITLE"
+  if (( RUN_COMBINED )); then
+    echo "  Combined:  $COMBINED_TITLE"
   else
-    echo "  High noise: disabled"
-  fi
-  if (( RUN_LOW )); then
-    echo "  Low title:  $LOW_TITLE"
-  else
-    echo "  Low noise:  disabled"
+    if (( RUN_HIGH )); then
+      echo "  High title: $HIGH_TITLE"
+    else
+      echo "  High noise: disabled"
+    fi
+    if (( RUN_LOW )); then
+      echo "  Low title:  $LOW_TITLE"
+    else
+      echo "  Low noise:  disabled"
+    fi
   fi
   echo "  Author:     $AUTHOR"
   echo "  Save every: $SAVE_EVERY epochs"
@@ -914,6 +938,10 @@ main() {
     require "$HIGH_DIT"
   fi
   if (( RUN_LOW )); then
+    require "$LOW_DIT"
+  fi
+  if (( RUN_COMBINED )); then
+    require "$HIGH_DIT"
     require "$LOW_DIT"
   fi
   require "$DATASET"
@@ -949,12 +977,18 @@ main() {
   # Allocate distinct rendezvous ports to prevent EADDRINUSE
   local HIGH_PORT=""
   local LOW_PORT=""
+  local COMBINED_PORT=""
   local HIGH_GPU=""
   local LOW_GPU=""
+  local COMBINED_GPU=""
   local HIGH_PID=""
   local LOW_PID=""
+  local COMBINED_PID=""
   local -a WAIT_PIDS=()
 
+  if (( RUN_COMBINED )); then
+    COMBINED_PORT=$(get_free_port)
+  fi
   if (( RUN_HIGH )); then
     HIGH_PORT=$(get_free_port)
   fi
@@ -965,13 +999,69 @@ main() {
     fi
   fi
 
+  if (( RUN_COMBINED )); then
+    echo "Waiting for a free GPU for COMBINED noise training..."
+    COMBINED_GPU=$(wait_for_free_gpu)
+    echo "Starting COMBINED on GPU $COMBINED_GPU (port $COMBINED_PORT) -> run_combined.log"
+    local -a COMBINED_TRAIN_ARGS=()
+    if [[ -n "$TRAIN_PARAMS_PATH" ]]; then
+      build_custom_train_args "combined" "$COMBINED_TITLE" "$LOW_DIT" 0 1000 "$DEFAULT_OUTPUT_DIR" "$HIGH_DIT" "$SAVE_EVERY"
+      COMBINED_TRAIN_ARGS=("${CUSTOM_TRAIN_ARGS[@]}")
+    else
+      COMBINED_TRAIN_ARGS=(
+        --task "$TRAIN_TASK"
+        --dit "$LOW_DIT"
+        --dit_high_noise "$HIGH_DIT"
+        --vae "$VAE"
+        --t5 "$T5"
+        --dataset_config "$DATASET"
+        $ATTN_FLAGS
+        --mixed_precision fp16
+        --fp8_base
+        --optimizer_type adamw
+        --learning_rate 3e-4
+        --gradient_checkpointing
+        --gradient_accumulation_steps 1
+        --max_data_loader_n_workers "$MAX_DATA_LOADER_WORKERS"
+        --network_module networks.lora_wan
+        --network_dim 16
+        --network_alpha 16
+        --timestep_sampling shift
+        --discrete_flow_shift 1.0
+        --max_train_epochs 100
+        --save_every_n_epochs "$SAVE_EVERY"
+        --seed 5
+        --optimizer_args weight_decay=0.1
+        --max_grad_norm 0
+        --lr_scheduler polynomial
+        --lr_scheduler_power 8
+        --lr_scheduler_min_lr_ratio=5e-5
+        --output_dir "$DEFAULT_OUTPUT_DIR"
+        --output_name "$COMBINED_TITLE"
+        --metadata_title "$COMBINED_TITLE"
+        --metadata_author "$AUTHOR"
+        --preserve_distribution_shape
+        --min_timestep 0
+        --max_timestep 1000
+        --timestep_boundary 875
+        --offload_inactive_dit
+      )
+    fi
+    MASTER_ADDR=127.0.0.1 MASTER_PORT="$COMBINED_PORT" CUDA_VISIBLE_DEVICES="$COMBINED_GPU" \\
+    "$ACCELERATE" launch --num_cpu_threads_per_process "$CPU_THREADS_PER_PROCESS" --num_processes 1 --main_process_port "$COMBINED_PORT" src/musubi_tuner/wan_train_network.py \\
+      "${COMBINED_TRAIN_ARGS[@]}" \\
+      > "$PWD/run_combined.log" 2>&1 &
+    COMBINED_PID=$!
+    WAIT_PIDS+=("$COMBINED_PID")
+  fi
+
   if (( RUN_HIGH )); then
     echo "Waiting for a free GPU for HIGH noise training..."
     HIGH_GPU=$(wait_for_free_gpu)
     echo "Starting HIGH on GPU $HIGH_GPU (port $HIGH_PORT) -> run_high.log"
     local -a HIGH_TRAIN_ARGS=()
     if [[ -n "$TRAIN_PARAMS_PATH" ]]; then
-      build_custom_train_args "high" "$HIGH_TITLE" "$HIGH_DIT" 875 1000 "$DEFAULT_OUTPUT_DIR"
+      build_custom_train_args "high" "$HIGH_TITLE" "$HIGH_DIT" 875 1000 "$DEFAULT_OUTPUT_DIR" "" "$SAVE_EVERY"
       HIGH_TRAIN_ARGS=("${CUSTOM_TRAIN_ARGS[@]}")
     else
       HIGH_TRAIN_ARGS=(
@@ -1032,7 +1122,7 @@ main() {
     echo "Starting LOW on GPU $LOW_GPU (port $LOW_PORT) -> run_low.log"
     local -a LOW_TRAIN_ARGS=()
     if [[ -n "$TRAIN_PARAMS_PATH" ]]; then
-      build_custom_train_args "low" "$LOW_TITLE" "$LOW_DIT" 0 875 "$DEFAULT_OUTPUT_DIR"
+      build_custom_train_args "low" "$LOW_TITLE" "$LOW_DIT" 0 875 "$DEFAULT_OUTPUT_DIR" "" "$SAVE_EVERY"
       LOW_TRAIN_ARGS=("${CUSTOM_TRAIN_ARGS[@]}")
     else
       LOW_TRAIN_ARGS=(
@@ -1087,8 +1177,13 @@ main() {
   if (( RUN_LOW )); then
     echo "LOW  PID: $LOW_PID${LOW_GPU:+ (GPU $LOW_GPU)}, log: $PWD/run_low.log"
   fi
+  if (( RUN_COMBINED )); then
+    echo "COMBINED PID: $COMBINED_PID${COMBINED_GPU:+ (GPU $COMBINED_GPU)}, log: $PWD/run_combined.log"
+  fi
 
-  if (( RUN_HIGH )) && (( RUN_LOW )); then
+  if (( RUN_COMBINED )); then
+    echo "Waiting for combined training to finish..."
+  elif (( RUN_HIGH )) && (( RUN_LOW )); then
     echo "Waiting for both trainings to finish..."
   elif (( RUN_HIGH )); then
     echo "Waiting for high noise training to finish..."
@@ -1112,7 +1207,7 @@ main() {
   # Analyze training logs and generate plots
   echo ""
   echo "=== Analyzing Training Logs ==="
-  if [[ -f "$PWD/run_high.log" || -f "$PWD/run_low.log" ]]; then
+  if [[ -f "$PWD/run_high.log" || -f "$PWD/run_low.log" || -f "$PWD/run_combined.log" ]]; then
     "$PYTHON" /workspace/analyze_training_logs.py "$PWD" || echo "Warning: Log analysis failed"
     if [[ -d "$PWD/training_analysis" ]]; then
       mv "$PWD/training_analysis" "$RENAMED_OUTPUT/training_analysis"
@@ -1120,6 +1215,7 @@ main() {
 
     [[ -f "$PWD/run_high.log" ]] && cp "$PWD/run_high.log" "$RENAMED_OUTPUT/"
     [[ -f "$PWD/run_low.log" ]] && cp "$PWD/run_low.log" "$RENAMED_OUTPUT/"
+    [[ -f "$PWD/run_combined.log" ]] && cp "$PWD/run_combined.log" "$RENAMED_OUTPUT/"
   else
     echo "Warning: No log files found to analyze"
   fi
