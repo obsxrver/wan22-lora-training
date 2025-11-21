@@ -32,6 +32,7 @@ DATASET_ROOT = Path("/workspace/musubi-tuner/dataset")
 LOG_DIR = Path("/workspace/musubi-tuner")
 HIGH_LOG = LOG_DIR / "run_high.log"
 LOW_LOG = LOG_DIR / "run_low.log"
+COMBINED_LOG = LOG_DIR / "run_combined.log"
 API_KEY_CONFIG_PATH = Path.home() / ".config" / "vastai" / "vast_api_key"
 PRESET_ROOT = Path("presets")
 MANAGE_KEYS_URL = "https://cloud.vast.ai/manage-keys"
@@ -254,7 +255,7 @@ class TrainRequest(BaseModel):
     shutdown_instance: bool = True
     auto_confirm: bool = True
     training_mode: Literal["t2v", "i2v"] = "t2v"
-    noise_mode: Literal["both", "high", "low"] = "both"
+    noise_mode: Literal["both", "high", "low", "combined"] = "both"
     convert_videos_to_16fps: bool = False
     train_params: Optional["TrainParams"] = None
     preset_name: Optional[str] = None
@@ -263,7 +264,7 @@ class PresetPayload(BaseModel):
     name: str = Field(min_length=1)
     dataset_path: str = Field(min_length=1)
     training_mode: Literal["t2v", "i2v"] = "t2v"
-    noise_mode: Literal["both", "high", "low"] = "both"
+    noise_mode: Literal["both", "high", "low", "combined"] = "both"
     convert_videos_to_16fps: bool = False
     train_params: Optional[TrainParams] = None
     title_suffix: Optional[str] = None
@@ -665,11 +666,12 @@ class TrainingState:
         self.process: Optional[asyncio.subprocess.Process] = None
         self.status: str = "idle"
         self.running: bool = False
-        self.history: Dict[str, List[Dict[str, float]]] = {"high": [], "low": []}
-        self.current: Dict[str, Optional[Dict[str, Any]]] = {"high": None, "low": None}
+        self.history: Dict[str, List[Dict[str, float]]] = {"high": [], "low": [], "combined": []}
+        self.current: Dict[str, Optional[Dict[str, Any]]] = {"high": None, "low": None, "combined": None}
         self.pending: Dict[str, Dict[str, Optional[float]]] = {
             "high": {"step": None, "loss": None},
             "low": {"step": None, "loss": None},
+            "combined": {"step": None, "loss": None},
         }
         self.logs: deque[str] = deque(maxlen=MAX_LOG_LINES)
         self.stop_event: asyncio.Event = asyncio.Event()
@@ -680,11 +682,12 @@ class TrainingState:
 
     def reset_for_start(self, active_runs: Optional[Set[str]] = None) -> None:
         self.active_runs = set(active_runs or {"high", "low"})
-        self.history = {"high": [], "low": []}
-        self.current = {"high": None, "low": None}
+        self.history = {"high": [], "low": [], "combined": []}
+        self.current = {"high": None, "low": None, "combined": None}
         self.pending = {
             "high": {"step": None, "loss": None},
             "low": {"step": None, "loss": None},
+            "combined": {"step": None, "loss": None},
         }
         self.logs.clear()
         self.stop_event = asyncio.Event()
@@ -721,6 +724,10 @@ class TrainingState:
             "low": {
                 "history": list(self.history["low"]),
                 "current": dict(self.current["low"]) if self.current["low"] else None,
+            },
+            "combined": {
+                "history": list(self.history["combined"]),
+                "current": dict(self.current["combined"]) if self.current["combined"] else None,
             },
             "logs": list(self.logs),
         }
@@ -1443,7 +1450,7 @@ async def start_training(payload: TrainRequest) -> Dict:
     if training_state.running:
         raise HTTPException(status_code=409, detail="Training already in progress")
 
-    for log_path in (HIGH_LOG, LOW_LOG):
+    for log_path in (HIGH_LOG, LOW_LOG, COMBINED_LOG):
         try:
             log_path.unlink()
         except FileNotFoundError:
@@ -1477,6 +1484,8 @@ async def start_training(payload: TrainRequest) -> Dict:
         active_runs: Set[str] = {"high"}
     elif noise_mode == "low":
         active_runs = {"low"}
+    elif noise_mode == "combined":
+        active_runs = {"combined"}
     else:
         active_runs = {"high", "low"}
     train_params_path = _write_train_params(payload, dataset_config_path)
@@ -1519,6 +1528,9 @@ async def start_training(payload: TrainRequest) -> Dict:
     if "low" in active_runs:
         low_task = asyncio.create_task(monitor_log_file(LOW_LOG, "low"))
         training_state.add_task(low_task)
+    if "combined" in active_runs:
+        combined_task = asyncio.create_task(monitor_log_file(COMBINED_LOG, "combined"))
+        training_state.add_task(combined_task)
 
     wait_task = asyncio.create_task(wait_for_completion(process))
     training_state.add_task(wait_task)

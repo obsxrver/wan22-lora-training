@@ -792,8 +792,12 @@
                       <input type="radio" name="noiseMode" value="both" checked />
                       <span>Both (Recommended)</span>
                     </label>
+                    <label class="mode-option">
+                      <input type="radio" name="noiseMode" value="combined" />
+                      <span>Combined</span>
+                    </label>
                   </div>
-                  <p class="mode-hint">If your instance has 2 GPUs, I can train high noise and low noise simultaneously.</p>
+                  <p class="mode-hint">Combined mode trains a single model on both high and low noise ranges.</p>
                 </fieldset>
               </div>
               <div class="form-row two-col">
@@ -887,6 +891,16 @@
             <p>Time elapsed: <span id="lowElapsed">-</span></p>
             <p>Time remaining: <span id="lowEta">-</span></p>
           </div>
+          <div class="metric-card" id="combinedMetrics">
+            <h3>Combined</h3>
+            <p class="metric-status" id="combinedStatus" aria-live="polite"></p>
+            <p>Current step: <span id="combinedStep">-</span></p>
+            <p>Current loss: <span id="combinedLoss">-</span></p>
+            <p>Epoch: <span id="combinedEpoch">-</span></p>
+            <p>Total steps: <span id="combinedTotalSteps">-</span></p>
+            <p>Time elapsed: <span id="combinedElapsed">-</span></p>
+            <p>Time remaining: <span id="combinedEta">-</span></p>
+          </div>
         </div>
         <canvas id="lossChart"></canvas>
       </section>
@@ -938,6 +952,14 @@
       const lowEtaEl = document.getElementById('lowEta');
       const lowStatusEl = document.getElementById('lowStatus');
       const lowCardEl = document.getElementById('lowMetrics');
+      const combinedStepEl = document.getElementById('combinedStep');
+      const combinedLossEl = document.getElementById('combinedLoss');
+      const combinedEpochEl = document.getElementById('combinedEpoch');
+      const combinedTotalStepsEl = document.getElementById('combinedTotalSteps');
+      const combinedElapsedEl = document.getElementById('combinedElapsed');
+      const combinedEtaEl = document.getElementById('combinedEta');
+      const combinedStatusEl = document.getElementById('combinedStatus');
+      const combinedCardEl = document.getElementById('combinedMetrics');
       const stopButton = document.getElementById('stopButton');
       const logOutput = document.getElementById('logOutput');
       const uploadCloudCheckbox = form.querySelector('input[name="uploadCloud"]');
@@ -947,7 +969,7 @@
       const apiKeyButton = document.getElementById('saveApiKeyButton');
       const apiKeyMessageEl = document.getElementById('apiKeyMessage');
       let currentCloudStatus = null;
-      const DEFAULT_PRESET_NAME = '/u/ai_characters';
+      const DEFAULT_PRESET_NAME = '/AI_Characters';
       let hasLoadedDefaultPreset = false;
       const NO_CAPTION_TEXT = 'No caption file found for this media.';
 
@@ -985,7 +1007,6 @@
         { key: 'timestep_sampling', label: 'Timestep sampling', type: 'text' },
         { key: 'discrete_flow_shift', label: 'Discrete flow shift', type: 'number' },
         { key: 'max_train_epochs', label: 'Max train epochs', type: 'number' },
-        { key: 'save_every_n_epochs', label: 'Save every n epochs', type: 'number' },
         { key: 'seed', label: 'Seed', type: 'number' },
         { key: 'optimizer_args', label: 'Optimizer args', type: 'text' },
         { key: 'max_grad_norm', label: 'Max grad norm', type: 'number' },
@@ -993,16 +1014,12 @@
         { key: 'lr_scheduler_power', label: 'LR scheduler power', type: 'number' },
         { key: 'lr_scheduler_min_lr_ratio', label: 'LR min lr ratio', type: 'number' },
         { key: 'lr_warmup_steps', label: 'LR warmup steps', type: 'number' },
-        { key: 'output_dir', label: 'Output dir', type: 'text' },
         { key: 'output_name', label: 'Output name', type: 'text' },
         { key: 'metadata_title', label: 'Metadata title', type: 'text' },
-        { key: 'metadata_author', label: 'Metadata author', type: 'text' },
         { key: 'preserve_distribution_shape', label: 'Preserve distribution shape', type: 'checkbox' },
         { key: 'min_timestep', label: 'Min timestep', type: 'number' },
         { key: 'max_timestep', label: 'Max timestep', type: 'number' },
         { key: 'img_in_txt_in_offloading', label: 'img_in_txt_in_offloading', type: 'checkbox' },
-        { key: 'log_with', label: 'Log with', type: 'text' },
-        { key: 'logging_dir', label: 'Logging dir', type: 'text' },
         { key: 'offload_inactive_dit', label: 'Offload inactive DiT', type: 'checkbox' },
         { key: 'persistent_data_loader_workers', label: 'Persistent data loader workers', type: 'checkbox' },
         { key: 'timestep_boundary', label: 'Timestep boundary', type: 'number' },
@@ -1032,15 +1049,12 @@
           timestep_sampling: 'shift',
           discrete_flow_shift: 1,
           max_train_epochs: 100,
-          save_every_n_epochs: 20,
           seed: 5,
           optimizer_args: 'weight_decay=0.1',
           max_grad_norm: 0,
           lr_scheduler: 'polynomial',
           lr_scheduler_power: 8,
           lr_scheduler_min_lr_ratio: 0.00005,
-          output_dir: DEFAULT_PATHS.outputDir,
-          metadata_author: 'authorName',
           preserve_distribution_shape: true,
           sdpa: true,
         };
@@ -1933,6 +1947,16 @@
           status: lowStatusEl,
           card: lowCardEl,
         },
+        combined: {
+          step: combinedStepEl,
+          loss: combinedLossEl,
+          epoch: combinedEpochEl,
+          total: combinedTotalStepsEl,
+          elapsed: combinedElapsedEl,
+          eta: combinedEtaEl,
+          status: combinedStatusEl,
+          card: combinedCardEl,
+        },
       };
       const noiseModeInputs = form.querySelectorAll('input[name="noiseMode"]');
 
@@ -1963,7 +1987,7 @@
         const normalized = Array.isArray(runs)
           ? runs
               .map((run) => {
-                if (run === 'high' || run === 'low') {
+                if (run === 'high' || run === 'low' || run === 'combined') {
                   return run;
                 }
                 return null;
@@ -1974,18 +1998,33 @@
           normalized.push('high', 'low');
         }
         activeRuns = new Set(normalized);
-        ['high', 'low'].forEach((run) => {
+        ['high', 'low', 'combined'].forEach((run) => {
           const isActive = activeRuns.has(run);
           const statusText = isActive ? '' : 'Disabled in configuration.';
           setRunState(run, isActive, statusText);
+          
+          // Hide card if not active
+          const display = runDisplays[run];
+          if (display && display.card) {
+             if (isActive) {
+                 display.card.style.display = '';
+             } else {
+                 display.card.style.display = 'none';
+             }
+          }
         });
         if (chart && chart.data && Array.isArray(chart.data.datasets)) {
           const datasets = chart.data.datasets;
           if (datasets[0]) {
-            datasets[0].hidden = !activeRuns.has('high');
+            datasets[0].hidden = !activeRuns.has('high') && !activeRuns.has('combined');
+            // reuse high dataset for combined if it's the only one? Or separate?
+            // Let's add a 3rd dataset for combined.
           }
           if (datasets[1]) {
             datasets[1].hidden = !activeRuns.has('low');
+          }
+          if (datasets[2]) {
+             datasets[2].hidden = !activeRuns.has('combined');
           }
           chart.update('none');
         }
@@ -1997,7 +2036,10 @@
             return;
           }
           const value = (input.value || '').toLowerCase();
-          const runs = value === 'high' ? ['high'] : value === 'low' ? ['low'] : ['high', 'low'];
+          let runs = ['high', 'low'];
+          if (value === 'high') runs = ['high'];
+          else if (value === 'low') runs = ['low'];
+          else if (value === 'combined') runs = ['combined'];
           updateActiveRuns(runs);
         });
       });
@@ -2051,6 +2093,15 @@
                 data: [],
                 borderColor: 'rgba(166, 107, 255, 0.95)',
                 backgroundColor: 'rgba(166, 107, 255, 0.15)',
+                tension: 0.2,
+                pointRadius: 0,
+                borderWidth: 2,
+              },
+              {
+                label: 'Combined loss',
+                data: [],
+                borderColor: 'rgba(100, 255, 218, 0.95)',
+                backgroundColor: 'rgba(100, 255, 218, 0.15)',
                 tension: 0.2,
                 pointRadius: 0,
                 borderWidth: 2,
@@ -2122,7 +2173,8 @@
         chart.update('none');
         updateRunDisplay('high', null);
         updateRunDisplay('low', null);
-        ['high', 'low'].forEach((run) => {
+        updateRunDisplay('combined', null);
+        ['high', 'low', 'combined'].forEach((run) => {
           const isActive = activeRuns.has(run);
           setRunState(run, isActive, isActive ? '' : 'Disabled in configuration.');
         });
@@ -2274,7 +2326,12 @@
       }
 
       function updateMetric(run, payload) {
-        const datasetIndex = run === 'high' ? 0 : 1;
+        let datasetIndex;
+        if (run === 'high') datasetIndex = 0;
+        else if (run === 'low') datasetIndex = 1;
+        else if (run === 'combined') datasetIndex = 2;
+        else return;
+
         const dataset = chart.data.datasets[datasetIndex];
         if (!payload) {
           return;
@@ -2316,8 +2373,10 @@
         updateActiveRuns(Array.isArray(snapshot.active_runs) ? snapshot.active_runs : ['high', 'low']);
         applyHistory(0, snapshot.high?.history || []);
         applyHistory(1, snapshot.low?.history || []);
+        applyHistory(2, snapshot.combined?.history || []);
         updateRunDisplay('high', snapshot.high?.current || null);
         updateRunDisplay('low', snapshot.low?.current || null);
+        updateRunDisplay('combined', snapshot.combined?.current || null);
         chart.update('none');
         logLines.length = 0;
         (snapshot.logs || []).forEach((line) => logLines.push(line));
@@ -2335,8 +2394,8 @@
         const trainingModeRaw = (formData.get('trainingMode') || 't2v').toString().toLowerCase();
         const trainingMode = trainingModeRaw === 'i2v' ? 'i2v' : 't2v';
         const noiseModeRaw = (formData.get('noiseMode') || 'both').toString().toLowerCase();
-        const noiseMode = noiseModeRaw === 'high' || noiseModeRaw === 'low' ? noiseModeRaw : 'both';
-        const selectedRuns = noiseMode === 'high' ? ['high'] : noiseMode === 'low' ? ['low'] : ['high', 'low'];
+        const noiseMode = ['high', 'low', 'combined'].includes(noiseModeRaw) ? noiseModeRaw : 'both';
+        const selectedRuns = noiseMode === 'high' ? ['high'] : noiseMode === 'low' ? ['low'] : noiseMode === 'combined' ? ['combined'] : ['high', 'low'];
         const splitCommands = splitParamsToggle?.checked || false;
         const trainParams = buildTrainingParamsPayload(splitCommands);
         const payload = {
