@@ -30,7 +30,7 @@ Once the instance is running (wait a few minutes for the startup script to finis
 - **Drag-and-Drop Dataset Manager:** Upload images, videos, and caption files directly from your browser.
 - **Live Training Monitor:** Watch loss curves and step progress in real-time.
 - **Dual-GPU Support:** Automatically utilizes multiple GPUs to train High and Low noise models simultaneously.
-- **Vast.AI Cloud Integration:** Automatically uploads finished LoRAs to your configured cloud storage.
+- **Vast.AI Cloud Integration:** Automatically uploads finished LoRAs to your configured cloud storage (Supports: Google Drive, Dropbox, AWS S3, BlackBlaze).
 - **Cost Saving:** Option to automatically shut down the instance when training completes.
 - **Video Tools:** Built-in converter to standardize dataset videos to 16 FPS.
 
