@@ -20,7 +20,7 @@ Use the pre-built template to skip manual setup. This template automatically ins
 
 ### 2. Access the WebUI
 
-Once the instance is running (wait a few minutes for the startup script to finish downloading models):
+Once the instance is running (wait a few minutes for the startup script to finish downloading models. This can take some time, so ***be patient***. Check instance logs for progress):
 1.  Click the **"Open"** button on your Vast.AI instance.
 2.  Select **"wan-training-webui"** from the portal menu.
 3.  The UI will open in your browser.
