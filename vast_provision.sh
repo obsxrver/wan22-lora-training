@@ -71,41 +71,62 @@ fi
   cd /workspace/musubi-tuner
 
   mkdir -p models/text_encoders models/vae models/diffusion_models
+) & pids+=($!)
 
+DOWNLOAD_STATUS_DIR=/workspace/musubi-tuner/models/download_status
+mkdir -p "${DOWNLOAD_STATUS_DIR}"
+
+start_download() {
+  local name="$1"
+  shift
+  local pid_file="${DOWNLOAD_STATUS_DIR}/${name}.pid"
+  local log_file="${DOWNLOAD_STATUS_DIR}/${name}.log"
+  local exit_file="${DOWNLOAD_STATUS_DIR}/${name}.exit"
+
+  nohup bash -c "cd /workspace/musubi-tuner && $*; rc=\$?; echo \${rc} > '${exit_file}'; rm -f '${pid_file}'; exit \${rc}" >"${log_file}" 2>&1 </dev/null &
+  echo $! >"${pid_file}"
+}
+
+echo "Starting model downloads in background..."
+start_download text_encoder \
   hf download \
     Wan-AI/Wan2.1-I2V-14B-720P \
     models_t5_umt5-xxl-enc-bf16.pth \
-    --local-dir models/text_encoders &
+    --local-dir models/text_encoders
 
+start_download vae \
   hf download \
     Comfy-Org/Wan_2.1_ComfyUI_repackaged \
     split_files/vae/wan_2.1_vae.safetensors \
-    --local-dir models/vae &
+    --local-dir models/vae
 
+start_download diffusion_high_noise \
   hf download \
     Comfy-Org/Wan_2.2_ComfyUI_Repackaged \
     split_files/diffusion_models/wan2.2_t2v_high_noise_14B_fp16.safetensors \
-    --local-dir models/diffusion_models &
+    --local-dir models/diffusion_models
 
+start_download diffusion_low_noise \
   hf download \
     Comfy-Org/Wan_2.2_ComfyUI_Repackaged \
     split_files/diffusion_models/wan2.2_t2v_low_noise_14B_fp16.safetensors \
-    --local-dir models/diffusion_models &
+    --local-dir models/diffusion_models
 
+start_download diffusion_high_noise_i2v \
   hf download \
     Comfy-Org/Wan_2.2_ComfyUI_Repackaged \
     split_files/diffusion_models/wan2.2_i2v_high_noise_14B_fp16.safetensors \
-    --local-dir models/diffusion_models &
+    --local-dir models/diffusion_models
 
+start_download diffusion_low_noise_i2v \
   hf download \
     Comfy-Org/Wan_2.2_ComfyUI_Repackaged \
     split_files/diffusion_models/wan2.2_i2v_low_noise_14B_fp16.safetensors \
-    --local-dir models/diffusion_models &
+    --local-dir models/diffusion_models
 
-  wait
-) & pids+=($!)
+echo "Model downloads running in background. PID files stored in ${DOWNLOAD_STATUS_DIR}."
 
-# ---------- wait for both tasks ----------
+# ---------- wait for critical tasks ----------
 wait_all
 
 WEBUI_PORT=7865

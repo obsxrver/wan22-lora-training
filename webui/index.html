@@ -852,6 +852,9 @@
       const apiKeyButton = document.getElementById('saveApiKeyButton');
       const apiKeyMessageEl = document.getElementById('apiKeyMessage');
       let currentCloudStatus = null;
+      let trainingRunning = false;
+      let startInFlight = false;
+      let downloadStatus = { pending: false, active: [] };
       const NO_CAPTION_TEXT = 'No caption file found for this media.';
 
       const MAX_LOG_LINES = 400;
@@ -1743,6 +1746,37 @@
         messageEl.style.color = isError ? '#ff8a80' : 'var(--muted)';
       }
 
+      function formatDownloadNames(active = []) {
+        if (!Array.isArray(active) || !active.length) {
+          return 'models';
+        }
+        return active
+          .map((name) => name.replace(/_/g, ' '))
+          .join(', ');
+      }
+
+      function updateControlState() {
+        const disableStart = startInFlight || trainingRunning || downloadStatus.pending;
+        startButton.disabled = disableStart;
+        stopButton.disabled = !trainingRunning;
+      }
+
+      function applyDownloadStatus(status) {
+        downloadStatus = {
+          pending: Boolean(status?.pending),
+          active: Array.isArray(status?.active) ? status.active : [],
+        };
+
+        if (downloadStatus.pending) {
+          const description = formatDownloadNames(downloadStatus.active);
+          setMessage(
+            `Model downloads are still in progress (${description}). Training will be available once they finish.`,
+          );
+        }
+
+        updateControlState();
+      }
+
       function updateLog(line) {
         if (!line) {
           return;
@@ -1794,8 +1828,8 @@
 
       function applySnapshot(snapshot) {
         setStatus(snapshot.status ? snapshot.status.charAt(0).toUpperCase() + snapshot.status.slice(1) : 'Idle');
-        startButton.disabled = !!snapshot.running;
-        stopButton.disabled = !snapshot.running;
+        startInFlight = false;
+        trainingRunning = !!snapshot.running;
         if (snapshot.noise_mode) {
           const noiseInput = form.querySelector(`input[name="noiseMode"][value="${snapshot.noise_mode}"]`);
           if (noiseInput) {
@@ -1816,6 +1850,9 @@
         } else {
           logOutput.textContent = 'Waiting for training output…';
         }
+
+        applyDownloadStatus(snapshot.downloads || {});
+        updateControlState();
       }
 
       async function startTraining(event) {
@@ -1850,9 +1887,20 @@
           return;
         }
 
+        if (downloadStatus.pending) {
+          const description = formatDownloadNames(downloadStatus.active);
+          setMessage(
+            `Model downloads are still in progress (${description}). Please wait before starting training.`,
+            true,
+          );
+          updateControlState();
+          return;
+        }
+
         resetChart();
         setMessage('Launching training…');
-        startButton.disabled = true;
+        startInFlight = true;
+        updateControlState();
 
         try {
           const response = await fetch('/train', {
@@ -1865,10 +1913,13 @@
             throw new Error(error.detail || 'Failed to start training');
           }
           updateActiveRuns(selectedRuns);
+          trainingRunning = true;
+          startInFlight = false;
+          updateControlState();
           setMessage('Training started. Watching logs…');
-          stopButton.disabled = false;
         } catch (error) {
-          startButton.disabled = false;
+          startInFlight = false;
+          updateControlState();
           setMessage(error.message || 'Failed to start training', true);
         }
       }
@@ -1902,8 +1953,8 @@
             break;
           case 'status':
             setStatus(data.status ? data.status.charAt(0).toUpperCase() + data.status.slice(1) : 'Idle');
-            startButton.disabled = !!data.running;
-            stopButton.disabled = !data.running;
+            trainingRunning = !!data.running;
+            updateControlState();
             if (data.status === 'failed') {
               setMessage('Training failed. See logs for details.', true);
             } else if (data.status === 'completed') {
@@ -1913,6 +1964,9 @@
             } else if (data.status === 'stopped') {
               setMessage('Training stopped by user.');
             }
+            break;
+          case 'downloads':
+            applyDownloadStatus(data);
             break;
           case 'metrics':
             updateMetric(data.run, data);

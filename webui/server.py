@@ -9,6 +9,7 @@ import signal
 import subprocess
 import tempfile
 from collections import deque
+from contextlib import suppress
 from pathlib import Path
 from typing import Any, Dict, FrozenSet, Iterable, List, Optional, Set, Tuple
 
@@ -31,10 +32,12 @@ DATASET_ROOT = Path("/workspace/musubi-tuner/dataset")
 LOG_DIR = Path("/workspace/musubi-tuner")
 HIGH_LOG = LOG_DIR / "run_high.log"
 LOW_LOG = LOG_DIR / "run_low.log"
+DOWNLOAD_STATUS_DIR = Path("/workspace/musubi-tuner/models/download_status")
 API_KEY_CONFIG_PATH = Path.home() / ".config" / "vastai" / "vast_api_key"
 MANAGE_KEYS_URL = "https://cloud.vast.ai/manage-keys"
 CLOUD_SETTINGS_URL = "https://cloud.vast.ai/settings/"
 DATASET_ROOT.mkdir(parents=True, exist_ok=True)
+DOWNLOAD_STATUS_DIR.mkdir(parents=True, exist_ok=True)
 
 IMAGE_EXTENSIONS = {
     ".png",
@@ -199,6 +202,59 @@ def maybe_set_container_api_key() -> None:
         )
     except OSError:
         return
+
+
+def _read_pid(pid_path: Path) -> Optional[int]:
+    try:
+        text = pid_path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    if not text:
+        return None
+    try:
+        return int(text)
+    except ValueError:
+        return None
+
+
+def _process_is_running(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def get_download_status() -> Dict[str, Any]:
+    active: List[str] = []
+    if not DOWNLOAD_STATUS_DIR.exists():
+        return {"active": active, "pending": False}
+
+    for pid_file in DOWNLOAD_STATUS_DIR.glob("*.pid"):
+        pid_value = _read_pid(pid_file)
+        if pid_value is None or not _process_is_running(pid_value):
+            try:
+                pid_file.unlink()
+            except OSError:
+                pass
+            exit_marker = pid_file.with_suffix(".exit")
+            try:
+                if exit_marker.exists():
+                    exit_marker.unlink()
+            except OSError:
+                pass
+            continue
+        active.append(pid_file.stem)
+
+    return {"active": sorted(active), "pending": bool(active)}
+
+
+def build_snapshot() -> Dict:
+    snapshot = training_state.snapshot()
+    snapshot["downloads"] = get_download_status()
+    return snapshot
 
 
 async def gather_cloud_status() -> Dict[str, Any]:
@@ -736,6 +792,7 @@ class TrainingState:
 
 event_manager = EventManager()
 training_state = TrainingState()
+download_watchdog_task: Optional[asyncio.Task] = None
 app = FastAPI(title="WAN 2.2 Training UI")
 
 
@@ -1386,6 +1443,14 @@ async def start_training(payload: TrainRequest) -> Dict:
     if training_state.running:
         raise HTTPException(status_code=409, detail="Training already in progress")
 
+    download_status = get_download_status()
+    if download_status.get("pending"):
+        active = download_status.get("active") or []
+        detail = "Model downloads are still in progress. Please wait for provisioning to finish."
+        if active:
+            detail = f"{detail} Pending: {', '.join(active)}."
+        raise HTTPException(status_code=409, detail=detail)
+
     for log_path in (HIGH_LOG, LOW_LOG):
         try:
             log_path.unlink()
@@ -1449,7 +1514,7 @@ async def start_training(payload: TrainRequest) -> Dict:
         training_state.append_log(message)
         await event_manager.publish({"type": "log", "line": message})
 
-    await event_manager.publish({"type": "snapshot", **training_state.snapshot()})
+    await event_manager.publish({"type": "snapshot", **build_snapshot()})
     await event_manager.publish({"type": "status", "status": "running", "running": True})
 
     stdout_task = asyncio.create_task(stream_process_output(process))
@@ -1517,15 +1582,25 @@ async def stop_training() -> Dict:
     return {"status": "stopping"}
 
 
+async def monitor_download_status(poll_interval: float = 5.0) -> None:
+    previous: Optional[Dict[str, Any]] = None
+    while True:
+        status = get_download_status()
+        if status != previous:
+            await event_manager.publish({"type": "downloads", **status})
+            previous = status
+        await asyncio.sleep(poll_interval)
+
+
 @app.get("/status")
 async def status() -> Dict:
-    return training_state.snapshot()
+    return build_snapshot()
 
 
 @app.get("/events")
 async def events() -> StreamingResponse:
     queue = await event_manager.register()
-    snapshot = training_state.snapshot()
+    snapshot = build_snapshot()
 
     async def event_generator():
         try:
@@ -1541,6 +1616,16 @@ async def events() -> StreamingResponse:
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
+@app.on_event("startup")
+async def startup_event() -> None:
+    global download_watchdog_task
+    download_watchdog_task = asyncio.create_task(monitor_download_status())
+
+
 @app.on_event("shutdown")
 async def shutdown_event() -> None:
     await training_state.wait_for_tasks()
+    if download_watchdog_task is not None:
+        download_watchdog_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await download_watchdog_task
