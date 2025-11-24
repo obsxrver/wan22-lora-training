@@ -542,6 +542,11 @@ class UpdateCaptionRequest(BaseModel):
     caption_path: Optional[str] = None
 
 
+class BulkCaptionRequest(BaseModel):
+    caption_text: str = Field(min_length=1)
+    apply_to: Literal["all_images", "uncaptioned_images"] = "all_images"
+
+
 class EventManager:
     def __init__(self) -> None:
         self._listeners: List[asyncio.Queue] = []
@@ -851,6 +856,22 @@ def _collect_dataset_items() -> List[Dict[str, Any]]:
     return items
 
 
+def _is_in_protected_dir(path: Path) -> bool:
+    try:
+        relative_parts = path.relative_to(DATASET_ROOT).parts
+    except ValueError:
+        return False
+    return any(part.lower() in PROTECTED_DATASET_DIRS for part in relative_parts)
+
+
+def _find_existing_caption_file(media_file: Path) -> Optional[Path]:
+    for suffix, _ in sorted(CAPTION_PRIORITY.items(), key=lambda item: item[1]):
+        candidate = media_file.with_suffix(suffix)
+        if candidate.exists() and candidate.is_file():
+            return candidate
+    return None
+
+
 def _resolve_dataset_relative_path(relative_path: str) -> Path:
     dataset_root = DATASET_ROOT.resolve()
     normalized = _normalize_export_path(relative_path)
@@ -1041,6 +1062,68 @@ async def dataset_update_caption(payload: UpdateCaptionRequest) -> Dict[str, Any
 
     message = f"Caption updated for '{media_path}'."
     return {"message": message, "caption_text": caption_text, "caption_path": relative_caption}
+
+
+@app.post("/dataset/caption/bulk")
+async def dataset_bulk_caption(payload: BulkCaptionRequest) -> Dict[str, Any]:
+    caption_text = payload.caption_text.replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not caption_text:
+        raise HTTPException(status_code=400, detail="caption_text is required")
+
+    if not DATASET_ROOT.exists() or not DATASET_ROOT.is_dir():
+        return {
+            "message": "Dataset directory is missing.",
+            "updated_count": 0,
+            "skipped_count": 0,
+            "total_images": 0,
+            "caption_text": caption_text,
+        }
+
+    total_images = 0
+    updated_count = 0
+    skipped_count = 0
+    dataset_root = DATASET_ROOT.resolve()
+
+    for file_path in dataset_root.rglob("*"):
+        if not file_path.is_file() or _is_in_protected_dir(file_path):
+            continue
+        if file_path.suffix.lower() not in IMAGE_EXTENSIONS:
+            continue
+
+        total_images += 1
+        existing_caption = _find_existing_caption_file(file_path)
+        if payload.apply_to == "uncaptioned_images" and existing_caption is not None:
+            skipped_count += 1
+            continue
+
+        caption_file = file_path.with_suffix(".txt")
+        caption_file.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            caption_file.write_text(caption_text, encoding="utf-8")
+        except OSError as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to save caption for '{file_path.name}': {exc}",
+            ) from exc
+
+        updated_count += 1
+
+    if total_images == 0:
+        message = "No images found to caption."
+    else:
+        plural = "s" if total_images != 1 else ""
+        message = f"Applied caption to {updated_count} of {total_images} image{plural}."
+        if payload.apply_to == "uncaptioned_images" and skipped_count:
+            skipped_plural = "s" if skipped_count != 1 else ""
+            message += f" Skipped {skipped_count} image{skipped_plural} with existing captions."
+
+    return {
+        "message": message,
+        "updated_count": updated_count,
+        "skipped_count": skipped_count,
+        "total_images": total_images,
+        "caption_text": caption_text,
+    }
 
 
 def _iter_file_chunks(file_path: Path, start: int = 0, end: Optional[int] = None, chunk_size: int = 1024 * 1024):
