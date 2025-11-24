@@ -1,5 +1,7 @@
 # Wan 2.2 LoRA Training WebUI
 
+## _try it_ <a href="https://cloud.vast.ai/?ref_id=208628&creator_id=208628&name=Wan%202.2%20LoRA%20Training%20WebUI" target="_blank"> *here* </a>
+
 A full-featured WebUI for training Wan 2.2 LoRAs on Vast.AI. Supports both Text-to-Video (T2V) and Image-to-Video (I2V) training with real-time monitoring and cloud uploads.
 
 ![Wan 2.2 LoRA Training WebUI](media/1_UI.png)
