@@ -776,7 +776,7 @@
       </section>
 
       <section>
-        <h2>3. Live progress</h2>
+        <h2 id="liveProgressHeading">3. Live progress</h2>
         <div class="metrics">
           <div class="metric-card" id="highMetrics">
             <h3>High noise</h3>
@@ -845,12 +845,14 @@
       const lowCardEl = document.getElementById('lowMetrics');
       const stopButton = document.getElementById('stopButton');
       const logOutput = document.getElementById('logOutput');
+      const liveProgressHeading = document.getElementById('liveProgressHeading');
       const uploadCloudCheckbox = form.querySelector('input[name="uploadCloud"]');
       const uploadCloudLabel = uploadCloudCheckbox ? uploadCloudCheckbox.closest('.toggle') : null;
       const cloudStatusMessageEl = document.getElementById('cloudStatusMessage');
       const apiKeyInput = document.getElementById('vastApiKeyInput');
       const apiKeyButton = document.getElementById('saveApiKeyButton');
       const apiKeyMessageEl = document.getElementById('apiKeyMessage');
+      const FORM_STORAGE_KEY = 'wan-training-form-data';
       let currentCloudStatus = null;
       let trainingRunning = false;
       let startInFlight = false;
@@ -876,6 +878,100 @@
         }
         bulkCaptionStatus.textContent = text;
         bulkCaptionStatus.style.color = isError ? '#ff8a80' : 'var(--muted)';
+      }
+
+      function saveFormState() {
+        if (!form) {
+          return;
+        }
+        const state = {};
+        Array.from(form.elements).forEach((element) => {
+          const name = element.name;
+          if (!name) {
+            return;
+          }
+          const type = (element.type || '').toLowerCase();
+          if (type === 'checkbox') {
+            state[name] = element.checked;
+          } else if (type === 'radio') {
+            if (element.checked) {
+              state[name] = element.value;
+            }
+          } else {
+            state[name] = element.value;
+          }
+        });
+        try {
+          localStorage.setItem(FORM_STORAGE_KEY, JSON.stringify(state));
+        } catch (error) {
+          console.warn('Unable to persist training form state', error);
+        }
+      }
+
+      function loadFormState() {
+        if (!form) {
+          return;
+        }
+        let state;
+        try {
+          const raw = localStorage.getItem(FORM_STORAGE_KEY);
+          if (!raw) {
+            return;
+          }
+          state = JSON.parse(raw);
+        } catch (error) {
+          console.warn('Unable to read persisted training form state', error);
+          return;
+        }
+        if (!state || typeof state !== 'object') {
+          return;
+        }
+
+        Array.from(form.elements).forEach((element) => {
+          const name = element.name;
+          if (!name || !(name in state)) {
+            return;
+          }
+          const storedValue = state[name];
+          const type = (element.type || '').toLowerCase();
+          if (type === 'checkbox') {
+            element.checked = Boolean(storedValue);
+          } else if (type === 'radio') {
+            element.checked = element.value === storedValue;
+          } else {
+            element.value = storedValue;
+          }
+        });
+      }
+
+      function getTitleSuffixValue() {
+        const input = form.querySelector('input[name="titleSuffix"]');
+        return input ? input.value.trim() : '';
+      }
+
+      function updateLiveProgressHeading(isRunning = trainingRunning) {
+        if (!liveProgressHeading) {
+          return;
+        }
+        const baseTitle = '3. Live progress';
+        const suffix = getTitleSuffixValue();
+        if (isRunning && suffix) {
+          liveProgressHeading.textContent = `${baseTitle}: ${suffix}`;
+        } else {
+          liveProgressHeading.textContent = baseTitle;
+        }
+      }
+
+      function initializeFormStatePersistence() {
+        loadFormState();
+        syncActiveRunsWithNoiseMode();
+        updateLiveProgressHeading(trainingRunning);
+        form.addEventListener('input', saveFormState);
+        form.addEventListener('change', saveFormState);
+        const titleSuffixInput = form.querySelector('input[name="titleSuffix"]');
+        if (titleSuffixInput) {
+          titleSuffixInput.addEventListener('input', () => updateLiveProgressHeading(trainingRunning));
+        }
       }
 
       async function loadFullCaption(options = {}) {
@@ -1460,6 +1556,13 @@
       let chart;
       let activeRuns = new Set(['high', 'low']);
 
+      function syncActiveRunsWithNoiseMode() {
+        const selectedNoise = Array.from(noiseModeInputs).find((input) => input.checked);
+        const value = (selectedNoise?.value || '').toLowerCase();
+        const runs = value === 'high' ? ['high'] : value === 'low' ? ['low'] : ['high', 'low'];
+        updateActiveRuns(runs);
+      }
+
       function setRunState(run, isActive, message = '') {
         const display = runDisplays[run];
         if (!display) {
@@ -1520,6 +1623,7 @@
           const value = (input.value || '').toLowerCase();
           const runs = value === 'high' ? ['high'] : value === 'low' ? ['low'] : ['high', 'low'];
           updateActiveRuns(runs);
+          saveFormState();
         });
       });
 
@@ -1631,6 +1735,7 @@
         });
       }
 
+      initializeFormStatePersistence();
       initChart();
       updateActiveRuns([...activeRuns]);
 
@@ -1830,6 +1935,7 @@
         setStatus(snapshot.status ? snapshot.status.charAt(0).toUpperCase() + snapshot.status.slice(1) : 'Idle');
         startInFlight = false;
         trainingRunning = !!snapshot.running;
+        updateLiveProgressHeading(trainingRunning);
         if (snapshot.noise_mode) {
           const noiseInput = form.querySelector(`input[name="noiseMode"][value="${snapshot.noise_mode}"]`);
           if (noiseInput) {
@@ -1858,6 +1964,7 @@
       async function startTraining(event) {
         event.preventDefault();
         const formData = new FormData(form);
+        saveFormState();
         const trainingModeRaw = (formData.get('trainingMode') || 't2v').toString().toLowerCase();
         const trainingMode = trainingModeRaw === 'i2v' ? 'i2v' : 't2v';
         const noiseModeRaw = (formData.get('noiseMode') || 'both').toString().toLowerCase();
@@ -1916,6 +2023,7 @@
           trainingRunning = true;
           startInFlight = false;
           updateControlState();
+          updateLiveProgressHeading(trainingRunning);
           setMessage('Training started. Watching logs…');
         } catch (error) {
           startInFlight = false;
@@ -1955,6 +2063,7 @@
             setStatus(data.status ? data.status.charAt(0).toUpperCase() + data.status.slice(1) : 'Idle');
             trainingRunning = !!data.running;
             updateControlState();
+            updateLiveProgressHeading(trainingRunning);
             if (data.status === 'failed') {
               setMessage('Training failed. See logs for details.', true);
             } else if (data.status === 'completed') {
