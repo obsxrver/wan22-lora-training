@@ -198,6 +198,54 @@
         color: var(--muted);
       }
 
+      .quick-caption {
+        margin-top: 1rem;
+        padding: 0.75rem 0.9rem;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.04);
+        display: grid;
+        gap: 0.5rem;
+      }
+
+      .quick-caption label {
+        color: var(--text);
+        font-weight: 700;
+        font-size: 0.95rem;
+      }
+
+      .quick-caption textarea {
+        width: 100%;
+        min-height: 60px;
+        padding: 0.55rem 0.65rem;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: rgba(0, 0, 0, 0.35);
+        color: var(--text);
+        font-family: inherit;
+        font-size: 0.9rem;
+        resize: vertical;
+      }
+
+      .quick-caption-hint {
+        margin: 0;
+        font-size: 0.85rem;
+        color: var(--muted);
+      }
+
+      .quick-caption-actions {
+        display: flex;
+        gap: 0.5rem;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+
+      .quick-caption-status {
+        color: var(--muted);
+        font-size: 0.9rem;
+        min-height: 1.1rem;
+      }
+
       .dataset-grid {
         margin-top: 1rem;
         display: grid;
@@ -595,6 +643,23 @@
             <p class="dataset-preview-hint">
               Need captions? Try the <a href="https://obsxrver.pro/SillyCaption" target="_blank" rel="noopener">SillyCaption</a> tool to auto-generate captions before you start training.
             </p>
+            <div class="quick-caption" aria-label="Quick caption helper">
+              <label for="bulkCaptionText">Quick caption for images</label>
+              <textarea
+                id="bulkCaptionText"
+                placeholder="Enter a short caption to apply"
+                spellcheck="false"
+                aria-describedby="bulkCaptionHint"
+              >ohwx_person</textarea>
+              <p id="bulkCaptionHint" class="quick-caption-hint">
+                For character LoRAs, try <strong>ohwx_person</strong>, <strong>ohwx_man</strong>, <strong>ohwx_woman</strong>, or the character name. For action LoRAs, use a short action phrase (e.g., "doing a cartwheel").
+              </p>
+              <div class="quick-caption-actions">
+                <button type="button" id="applyCaptionAll" class="button-inline">Tag all images</button>
+                <button type="button" id="applyCaptionMissing" class="button-inline">Tag uncaptioned images</button>
+                <span id="bulkCaptionStatus" class="quick-caption-status" aria-live="polite"></span>
+              </div>
+            </div>
             <div id="dataset-preview-message" aria-live="polite">No dataset files uploaded yet.</div>
             <div id="dataset-grid" class="dataset-grid" role="list"></div>
           </details>
@@ -752,6 +817,10 @@
       const uploadSummary = document.getElementById('upload-summary');
       const datasetGrid = document.getElementById('dataset-grid');
       const datasetMessage = document.getElementById('dataset-preview-message');
+      const bulkCaptionText = document.getElementById('bulkCaptionText');
+      const bulkCaptionStatus = document.getElementById('bulkCaptionStatus');
+      const applyCaptionAllButton = document.getElementById('applyCaptionAll');
+      const applyCaptionMissingButton = document.getElementById('applyCaptionMissing');
       const form = document.getElementById('trainingForm');
       const statusEl = document.getElementById('status');
       const messageEl = document.getElementById('message');
@@ -794,6 +863,14 @@
         datasetMessage.textContent = text;
         datasetMessage.style.display = text ? 'block' : 'none';
         datasetMessage.style.color = isError ? '#ff8a80' : 'var(--muted)';
+      }
+
+      function setBulkCaptionStatus(text = '', isError = false) {
+        if (!bulkCaptionStatus) {
+          return;
+        }
+        bulkCaptionStatus.textContent = text;
+        bulkCaptionStatus.style.color = isError ? '#ff8a80' : 'var(--muted)';
       }
 
       async function loadFullCaption(options = {}) {
@@ -1189,6 +1266,56 @@
         }
       }
 
+      async function runBulkCaption(applyTo = 'all_images') {
+        if (!bulkCaptionText) {
+          return;
+        }
+        const caption = bulkCaptionText.value.trim();
+        if (!caption) {
+          setBulkCaptionStatus('Enter a caption to apply.', true);
+          bulkCaptionText.focus();
+          return;
+        }
+
+        const buttons = [applyCaptionAllButton, applyCaptionMissingButton].filter(Boolean);
+        const originalLabels = buttons.map((button) => button.textContent);
+        buttons.forEach((button) => {
+          button.disabled = true;
+          button.textContent = 'Tagging…';
+        });
+        setBulkCaptionStatus('Applying caption…');
+
+        try {
+          const response = await fetch('/dataset/caption/bulk', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ caption_text: caption, apply_to: applyTo }),
+          });
+          let data = {};
+          try {
+            data = await response.json();
+          } catch (error) {
+            data = {};
+          }
+          if (!response.ok) {
+            const detail = data?.detail || data?.message || 'Failed to update captions.';
+            throw new Error(detail);
+          }
+          const message = data?.message || 'Captions updated.';
+          setBulkCaptionStatus(message, false);
+          await refreshDatasetPreview({ message });
+        } catch (error) {
+          setBulkCaptionStatus(error?.message || 'Failed to apply captions.', true);
+        } finally {
+          buttons.forEach((button, index) => {
+            if (button) {
+              button.disabled = false;
+              button.textContent = originalLabels[index] ?? button.textContent;
+            }
+          });
+        }
+      }
+
       function setApiKeyMessage(text = '', isError = false) {
         if (!apiKeyMessageEl) {
           return;
@@ -1503,6 +1630,15 @@
       updateActiveRuns([...activeRuns]);
 
       refreshDatasetPreview();
+
+      if (applyCaptionAllButton) {
+        applyCaptionAllButton.addEventListener('click', () => runBulkCaption('all_images'));
+      }
+      if (applyCaptionMissingButton) {
+        applyCaptionMissingButton.addEventListener('click', () =>
+          runBulkCaption('uncaptioned_images')
+        );
+      }
 
       function resetChart() {
         chart.data.datasets.forEach((dataset) => {
