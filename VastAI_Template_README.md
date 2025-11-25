@@ -13,7 +13,7 @@ Use this template to train Wan 2.2 LoRA with the simplest possible flow.
 - Put your captioned images and `.txt` files into:
   - `/workspace/musubi-tuner/dataset/`
 - A default `dataset.toml` is already present at:
-  - `/workspace/musubi-tuner/dataset/dataset.toml`
+- `/workspace/wan22-lora-training/dataset-configs/dataset.toml`
   - Edit if needed, or keep defaults.
 
 ## 3) Run the simple runner
@@ -31,7 +31,7 @@ The script will prompt you for:
 - Title suffix (default: `mylora`) → final names:
   - `WAN2.2-HighNoise_<suffix>` and `WAN2.2-LowNoise_<suffix>`
 - Author (default: `authorName`)
-- Dataset path (default: `/workspace/musubi-tuner/dataset/dataset.toml`)
+- Dataset path (default: `/workspace/wan22-lora-training/dataset-configs/dataset.toml`)
 
 What it does:
 - Caches latents and text encodings

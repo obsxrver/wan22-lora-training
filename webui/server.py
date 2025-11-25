@@ -29,6 +29,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 RUN_SCRIPT = REPO_ROOT / "run_wan_training.sh"
 INDEX_HTML_PATH = Path(__file__).with_name("index.html")
 DATASET_ROOT = Path("/workspace/musubi-tuner/dataset")
+DATASET_CONFIG_ROOT = Path("/workspace/wan22-lora-training/dataset-configs")
 LOG_DIR = Path("/workspace/musubi-tuner")
 HIGH_LOG = LOG_DIR / "run_high.log"
 LOW_LOG = LOG_DIR / "run_low.log"
@@ -37,6 +38,7 @@ API_KEY_CONFIG_PATH = Path.home() / ".config" / "vastai" / "vast_api_key"
 MANAGE_KEYS_URL = "https://cloud.vast.ai/manage-keys"
 CLOUD_SETTINGS_URL = "https://cloud.vast.ai/settings/"
 DATASET_ROOT.mkdir(parents=True, exist_ok=True)
+DATASET_CONFIG_ROOT.mkdir(parents=True, exist_ok=True)
 DOWNLOAD_STATUS_DIR.mkdir(parents=True, exist_ok=True)
 
 IMAGE_EXTENSIONS = {
@@ -428,9 +430,8 @@ async def _probe_video_fps(path: Path, ffprobe_path: str) -> Optional[float]:
         return None
 
 
-DATASET_CONFIG_FALLBACK_URL = (
-    "https://raw.githubusercontent.com/obsxrver/wan22-lora-training/refs/heads/main/dataset.toml"
-)
+DEFAULT_DATASET_CONFIG = DATASET_CONFIG_ROOT / "dataset.toml"
+DATASET_CONFIG_FALLBACK_URL = "https://raw.githubusercontent.com/obsxrver/wan22-lora-training/refs/heads/main/dataset-configs/dataset.toml"
 
 
 def _download_dataset_config(config_path: Path) -> None:
@@ -570,8 +571,9 @@ maybe_set_container_api_key()
 class TrainRequest(BaseModel):
     title_suffix: str = Field(default="mylora", min_length=1)
     author: str = Field(default="authorName", min_length=1)
-    dataset_path: str = Field(default=str(DATASET_ROOT / "dataset.toml"))
+    dataset_path: str = Field(default=str(DEFAULT_DATASET_CONFIG))
     save_every: int = Field(default=100, ge=1)
+    max_epochs: int = Field(default=100, ge=1)
     cpu_threads_per_process: Optional[int] = Field(default=None, ge=1)
     max_data_loader_workers: Optional[int] = Field(default=None, ge=1)
     upload_cloud: bool = True
@@ -804,6 +806,20 @@ async def index() -> str:
     if not INDEX_HTML_PATH.exists():
         raise HTTPException(status_code=500, detail="UI assets missing")
     return INDEX_HTML_PATH.read_text(encoding="utf-8")
+
+
+@app.get("/dataset-configs")
+async def list_dataset_configs() -> Dict[str, Any]:
+    if DATASET_CONFIG_ROOT.exists() and not DATASET_CONFIG_ROOT.is_dir():
+        raise HTTPException(status_code=500, detail="Dataset config path is not a directory")
+
+    DATASET_CONFIG_ROOT.mkdir(parents=True, exist_ok=True)
+    configs: List[Dict[str, str]] = []
+    for entry in sorted(DATASET_CONFIG_ROOT.glob("*.toml")):
+        if entry.is_file():
+            configs.append({"name": entry.name, "path": str(entry.resolve())})
+
+    return {"configs": configs, "default_path": str(DEFAULT_DATASET_CONFIG)}
 
 
 
@@ -1423,6 +1439,7 @@ def build_command(payload: TrainRequest) -> List[str]:
     args.extend(["--author", payload.author])
     args.extend(["--dataset", payload.dataset_path])
     args.extend(["--save-every", str(payload.save_every)])
+    args.extend(["--max-epochs", str(payload.max_epochs)])
     if payload.cpu_threads_per_process is not None:
         args.extend(["--cpu-threads-per-process", str(payload.cpu_threads_per_process)])
     if payload.max_data_loader_workers is not None:

@@ -29,9 +29,10 @@ cd musubi-tuner
 git fetch --all --tags --prune
 
 mkdir -p models/text_encoders models/vae models/diffusion_models
-mkdir -p /workspace/musubi-tuner/dataset
+mkdir -p /workspace/wan22-lora-training/dataset-configs
 
-curl -fsSL "https://raw.githubusercontent.com/obsxrver/wan22-lora-training/main/dataset.toml" -o /workspace/musubi-tuner/dataset/dataset.toml
+curl -fsSL "https://raw.githubusercontent.com/obsxrver/wan22-lora-training/main/dataset-configs/dataset.toml" -o /workspace/wan22-lora-training/dataset-configs/dataset.toml
+curl -fsSL "https://raw.githubusercontent.com/obsxrver/wan22-lora-training/main/dataset-configs/turbo.toml" -o /workspace/wan22-lora-training/dataset-configs/turbo.toml
 curl -fsSL "https://raw.githubusercontent.com/obsxrver/wan22-lora-training/main/run_wan_training.sh" -o /workspace/run_wan_training.sh
 curl -fsSL "https://raw.githubusercontent.com/obsxrver/wan22-lora-training/main/analyze_training_logs.py" -o /workspace/analyze_training_logs.py
 chmod +x /workspace/run_wan_training.sh
