@@ -1,22 +1,20 @@
-# resolution, caption_extension, batch_size, num_repeats, enable_bucket, bucket_no_upscale should be set in either general or datasets
-# otherwise, the default values will be used for each item
-# general configurations
+# turbo.toml
+# Lower VRAM / Faster Training at the cost of fine detail preservation
 [general]
-resolution = [540, 540]
 caption_extension = ".txt"
 batch_size = 1
-enable_bucket = true
-bucket_no_upscale = true
+enable_bucket = true # Downscales and upscales images, preserving aspect ratio.
+bucket_no_upscale = false 
+resolution = [540, 540] # Train images at a resolution of 0.29 Megapixels
+
 [[datasets]]
-image_directory = "/workspace/musubi-tuner/dataset"
+image_directory = "/workspace/musubi-tuner/dataset" # If you change this, the upload feature in the webui won't work
 cache_directory = "/workspace/musubi-tuner/dataset/cache"
-num_repeats = 1 # optional, default is 1. Number of times to repeat the dataset. Useful to balance the multiple datasets with different sizes.
-# other datasets can be added here. each dataset can have different configurations
+num_repeats = 1
 
 [[datasets]]
 video_directory = "/workspace/musubi-tuner/dataset"
 cache_directory = "/workspace/musubi-tuner/dataset/videocache"
 frame_extraction = "full" #start from the beginning of the video
 max_frames = 81 #only take 5 seconds
-resolution = [218,218] # 0.088 megapixels, slightly higher than most guides recommend
-#340x340 took too long, this takes half as long and gave spectacular result. If you still struggle to produce good outputs, make sure all your videos are 16fps, only use high quality source material, and make sure your captions are consistent.
+resolution = [218,218] # 0.048 MP For Videos. Will be fast with possible quality degredation
