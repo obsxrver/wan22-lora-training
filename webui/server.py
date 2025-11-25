@@ -569,7 +569,7 @@ async def convert_videos_to_target_fps(
 maybe_set_container_api_key()
 
 class TrainRequest(BaseModel):
-    title_suffix: str = Field(default="mylora", min_length=1)
+    title_prefix: str = Field(default="mylora", min_length=1)
     author: str = Field(default="authorName", min_length=1)
     dataset_path: str = Field(default=str(DEFAULT_DATASET_CONFIG))
     save_every: int = Field(default=100, ge=1)
@@ -1435,7 +1435,7 @@ async def wait_for_completion(process: asyncio.subprocess.Process) -> None:
 
 def build_command(payload: TrainRequest) -> List[str]:
     args = ["bash", str(RUN_SCRIPT)]
-    args.extend(["--title-suffix", payload.title_suffix])
+    args.extend(["--title-prefix", payload.title_prefix])
     args.extend(["--author", payload.author])
     args.extend(["--dataset", payload.dataset_path])
     args.extend(["--save-every", str(payload.save_every)])
