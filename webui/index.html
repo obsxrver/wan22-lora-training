@@ -395,6 +395,15 @@
         grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
       }
 
+      .dataset-config-picker {
+        display: grid;
+        gap: 0.5rem;
+      }
+
+      .dataset-config-picker input.readonly {
+        color: var(--muted);
+      }
+
       label {
         display: flex;
         flex-direction: column;
@@ -685,8 +694,20 @@
           </div>
           <div class="form-row">
             <label>
-              Dataset config path
-              <input type="text" name="datasetPath" value="/workspace/wan22-lora-training/datasets/dataset.toml" required />
+              Dataset config
+              <div class="dataset-config-picker">
+                <select id="datasetConfigSelect" aria-label="Dataset config preset"></select>
+                <input
+                  type="text"
+                  id="datasetPathInput"
+                  name="datasetPath"
+                  value="/workspace/wan22-lora-training/dataset-configs/dataset.toml"
+                  required
+                />
+              </div>
+              <div class="status-note">
+                Configs are loaded from /workspace/wan22-lora-training/dataset-configs/.
+              </div>
             </label>
           </div>
           <div class="form-row">
@@ -830,6 +851,8 @@
       const applyCaptionAllButton = document.getElementById('applyCaptionAll');
       const applyCaptionMissingButton = document.getElementById('applyCaptionMissing');
       const form = document.getElementById('trainingForm');
+      const datasetConfigSelect = document.getElementById('datasetConfigSelect');
+      const datasetPathInput = document.getElementById('datasetPathInput');
       const statusEl = document.getElementById('status');
       const messageEl = document.getElementById('message');
       const startButton = document.getElementById('startButton');
@@ -859,6 +882,9 @@
       const apiKeyButton = document.getElementById('saveApiKeyButton');
       const apiKeyMessageEl = document.getElementById('apiKeyMessage');
       const FORM_STORAGE_KEY = 'wan-training-form-data';
+      const DATASET_CONFIG_CUSTOM_VALUE = '__custom__';
+      const DATASET_CONFIG_DIR = '/workspace/wan22-lora-training/dataset-configs';
+      let datasetConfigOptions = [];
       let currentCloudStatus = null;
       let trainingRunning = false;
       let startInFlight = false;
@@ -884,6 +910,79 @@
         }
         bulkCaptionStatus.textContent = text;
         bulkCaptionStatus.style.color = isError ? '#ff8a80' : 'var(--muted)';
+      }
+
+      function setDatasetPathMode(isCustom) {
+        if (!datasetPathInput) {
+          return;
+        }
+        datasetPathInput.readOnly = !isCustom;
+        datasetPathInput.classList.toggle('readonly', !isCustom);
+      }
+
+      function syncDatasetSelection(value, defaultPath) {
+        if (!datasetConfigSelect || !datasetPathInput) {
+          return;
+        }
+        const selectedValue = value || defaultPath || '';
+        const matchingConfig = datasetConfigOptions.find((config) => config.path === selectedValue);
+        if (matchingConfig) {
+          datasetConfigSelect.value = matchingConfig.path;
+          datasetPathInput.value = matchingConfig.path;
+          setDatasetPathMode(false);
+        } else {
+          datasetConfigSelect.value = DATASET_CONFIG_CUSTOM_VALUE;
+          datasetPathInput.value = selectedValue || defaultPath || '';
+          setDatasetPathMode(true);
+        }
+      }
+
+      async function loadDatasetConfigs() {
+        if (!datasetConfigSelect || !datasetPathInput) {
+          return;
+        }
+
+        datasetConfigSelect.disabled = true;
+        datasetConfigSelect.innerHTML = '<option>Loading configs…</option>';
+        let defaultPath = datasetPathInput.value || `${DATASET_CONFIG_DIR}/dataset.toml`;
+
+        try {
+          const response = await fetch('/dataset-configs');
+          if (response.ok) {
+            const data = await response.json();
+            datasetConfigOptions = Array.isArray(data.configs) ? data.configs : [];
+            defaultPath = data.default_path || defaultPath;
+          } else {
+            datasetConfigOptions = [];
+          }
+        } catch (error) {
+          console.warn('Failed to load dataset configs', error);
+          datasetConfigOptions = [];
+        }
+
+        datasetConfigSelect.innerHTML = '';
+
+        if (datasetConfigOptions.length) {
+          datasetConfigOptions.forEach((config) => {
+            const option = document.createElement('option');
+            option.value = config.path;
+            option.textContent = config.name || config.path;
+            datasetConfigSelect.appendChild(option);
+          });
+        } else {
+          const emptyOption = document.createElement('option');
+          emptyOption.value = '';
+          emptyOption.textContent = 'No configs found';
+          datasetConfigSelect.appendChild(emptyOption);
+        }
+
+        const customOption = document.createElement('option');
+        customOption.value = DATASET_CONFIG_CUSTOM_VALUE;
+        customOption.textContent = 'Custom path…';
+        datasetConfigSelect.appendChild(customOption);
+
+        syncDatasetSelection(datasetPathInput.value, defaultPath);
+        datasetConfigSelect.disabled = false;
       }
 
       function saveFormState() {
@@ -1744,6 +1843,40 @@
       initializeFormStatePersistence();
       initChart();
       updateActiveRuns([...activeRuns]);
+
+      if (datasetConfigSelect) {
+        datasetConfigSelect.addEventListener('change', (event) => {
+          const selectedValue = event.target.value;
+          if (selectedValue && selectedValue !== DATASET_CONFIG_CUSTOM_VALUE) {
+            if (datasetPathInput) {
+              datasetPathInput.value = selectedValue;
+            }
+            setDatasetPathMode(false);
+          } else {
+            setDatasetPathMode(true);
+          }
+          saveFormState();
+        });
+      }
+
+      if (datasetPathInput) {
+        datasetPathInput.addEventListener('input', () => {
+          if (!datasetConfigSelect) {
+            return;
+          }
+          const value = datasetPathInput.value;
+          const matchingConfig = datasetConfigOptions.find((config) => config.path === value);
+          if (matchingConfig) {
+            datasetConfigSelect.value = matchingConfig.path;
+            setDatasetPathMode(false);
+          } else {
+            datasetConfigSelect.value = DATASET_CONFIG_CUSTOM_VALUE;
+            setDatasetPathMode(true);
+          }
+        });
+      }
+
+      loadDatasetConfigs().catch((error) => console.warn('Failed to populate dataset configs', error));
 
       refreshDatasetPreview();
 
