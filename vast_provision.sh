@@ -19,8 +19,8 @@ wait_all() {
 }
 
 cd /workspace
-if [[ ! -d wan22-lora-training ]]; then
-  git clone https://github.com/obsxrver/wan22-lora-training.git
+if [[ ! -d wan-training-webui ]]; then
+  git clone https://github.com/obsxrver/wan-training-webui.git
 fi
 if [[ ! -d musubi-tuner ]]; then
   git clone --recursive https://github.com/kohya-ss/musubi-tuner.git
@@ -29,12 +29,12 @@ cd musubi-tuner
 git fetch --all --tags --prune
 
 mkdir -p models/text_encoders models/vae models/diffusion_models
-mkdir -p /workspace/wan22-lora-training/dataset-configs
+mkdir -p /workspace/wan-training-webui/dataset-configs
 
-curl -fsSL "https://raw.githubusercontent.com/obsxrver/wan22-lora-training/main/dataset-configs/dataset.toml" -o /workspace/wan22-lora-training/dataset-configs/dataset.toml
-curl -fsSL "https://raw.githubusercontent.com/obsxrver/wan22-lora-training/main/dataset-configs/turbo.toml" -o /workspace/wan22-lora-training/dataset-configs/turbo.toml
-curl -fsSL "https://raw.githubusercontent.com/obsxrver/wan22-lora-training/main/run_wan_training.sh" -o /workspace/run_wan_training.sh
-curl -fsSL "https://raw.githubusercontent.com/obsxrver/wan22-lora-training/main/analyze_training_logs.py" -o /workspace/analyze_training_logs.py
+curl -fsSL "https://raw.githubusercontent.com/obsxrver/wan-training-webui/main/dataset-configs/dataset.toml" -o /workspace/wan-training-webui/dataset-configs/dataset.toml
+curl -fsSL "https://raw.githubusercontent.com/obsxrver/wan-training-webui/main/dataset-configs/turbo.toml" -o /workspace/wan-training-webui/dataset-configs/turbo.toml
+curl -fsSL "https://raw.githubusercontent.com/obsxrver/wan-training-webui/main/run_wan_training.sh" -o /workspace/run_wan_training.sh
+curl -fsSL "https://raw.githubusercontent.com/obsxrver/wan-training-webui/main/analyze_training_logs.py" -o /workspace/analyze_training_logs.py
 chmod +x /workspace/run_wan_training.sh
 chmod +x /workspace/analyze_training_logs.py
 
@@ -131,21 +131,21 @@ echo "Model downloads running in background. PID files stored in ${DOWNLOAD_STAT
 wait_all
 
 WEBUI_PORT=7865
-cat <<'EOF' >/workspace/wan22-lora-training/start_wan_webui.sh
+cat <<'EOF' >/workspace/wan-training-webui/start_wan_webui.sh
 #!/bin/bash
 set -euo pipefail
 WEBUI_PORT="${WEBUI_PORT:-7865}"
-cd /workspace/wan22-lora-training
+cd /workspace/wan-training-webui
 source /venv/main/bin/activate
 exec uvicorn webui.server:app --host 0.0.0.0 --port "${WEBUI_PORT}"
 EOF
-chmod +x /workspace/wan22-lora-training/start_wan_webui.sh
+chmod +x /workspace/wan-training-webui/start_wan_webui.sh
 
 if command -v supervisorctl >/dev/null 2>&1; then
   sudo tee /etc/supervisor/conf.d/wan-training-webui.conf >/dev/null <<'EOF'
 [program:wan-training-webui]
-command=/bin/bash /workspace/wan22-lora-training/start_wan_webui.sh
-directory=/workspace/wan22-lora-training
+command=/bin/bash /workspace/wan-training-webui/start_wan_webui.sh
+directory=/workspace/wan-training-webui
 autostart=true
 autorestart=true
 stdout_logfile=/workspace/wan-training-webui.out.log

@@ -85,7 +85,7 @@ Once configured, ensure the **"Upload LoRAs to cloud storage"** checkbox is sele
 ## Advanced Usage
 
 ### Manual Access
-If you prefer the terminal, the WebUI runs on top of standard scripts located in `/workspace/wan22-lora-training/`. The underlying training repo is `musubi-tuner` located at `/workspace/musubi-tuner`.
+If you prefer the terminal, the WebUI runs on top of standard scripts located in `/workspace/wan-training-webui/`. The underlying training repo is `musubi-tuner` located at `/workspace/musubi-tuner`.
 
 ---
 

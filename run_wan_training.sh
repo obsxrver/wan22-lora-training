@@ -8,7 +8,7 @@ set -euo pipefail
 # - If 2+ GPUs are free, runs them concurrently; otherwise waits for a free GPU
 
 MUSUBI_DIR="/workspace/musubi-tuner"
-DEFAULT_DATASET="/workspace/wan22-lora-training/dataset-configs/dataset.toml"
+DEFAULT_DATASET="/workspace/wan-training-webui/dataset-configs/dataset.toml"
 PYTHON="/venv/main/bin/python"
 ACCELERATE="/venv/main/bin/accelerate" #todo install in provisioning if errors
 
@@ -659,7 +659,7 @@ main() {
   if [[ ! -f "$DATASET" ]]; then
     echo "Dataset config not found at $DATASET; downloading..."
     mkdir -p "$(dirname "$DATASET")"
-    curl -fsSL "https://raw.githubusercontent.com/obsxrver/wan22-lora-training/main/dataset-configs/dataset.toml" -o "$DATASET" || echo "Failed to download dataset.toml" >&2
+    curl -fsSL "https://raw.githubusercontent.com/obsxrver/wan-training-webui/main/dataset-configs/dataset.toml" -o "$DATASET" || echo "Failed to download dataset.toml" >&2
   fi
 
   if [[ -z "${SAVE_EVERY_INPUT:-}" ]]; then

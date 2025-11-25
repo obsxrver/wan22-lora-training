@@ -634,7 +634,7 @@
       </div>
       <nav class="top-nav" aria-label="Main navigation">
         <a href="/" class="nav-link nav-link--active" aria-current="page">Training UI</a>
-        <a href="https://obsxrver.pro/SillyCaption" class="nav-link" target="_blank" rel="noopener">SillyCaption</a>
+        <a href="https://obsxrver.com/SillyCaption" class="nav-link" target="_blank" rel="noopener">SillyCaption</a>
       </nav>
     </header>
     <main>
@@ -652,7 +652,7 @@
               <h3>Current Dataset</h3>
             </summary>
             <p class="dataset-preview-hint">
-              Need captions? Try the <a href="https://obsxrver.pro/SillyCaption" target="_blank" rel="noopener">SillyCaption</a> tool to auto-generate captions before you start training.
+              Need captions? Try the <a href="https://obsxrver.com/SillyCaption" target="_blank" rel="noopener">SillyCaption</a> tool to auto-generate captions before you start training.
             </p>
             <div class="quick-caption" aria-label="Quick caption helper">
               <label for="bulkCaptionText">Quick caption for images</label>
@@ -701,12 +701,12 @@
                   type="text"
                   id="datasetPathInput"
                   name="datasetPath"
-                  value="/workspace/wan22-lora-training/dataset-configs/dataset.toml"
+                  value="/workspace/wan-training-webui/dataset-configs/dataset.toml"
                   required
                 />
               </div>
               <div class="status-note">
-                Configs are loaded from /workspace/wan22-lora-training/dataset-configs/.
+                Configs are loaded from /workspace/wan-training-webui/dataset-configs/.
               </div>
             </label>
           </div>
@@ -786,7 +786,7 @@
             <label>
               Vast.ai API key for cloud uploads
               <span class="status-note"
-                >Need a key? <a href="https://cloud.vast.ai/manage-keys" target="_blank" rel="noopener">Create one on Vast.ai</a>. Check <a href="https://github.com/obsxrver/wan22-training-webui?tab=readme-ov-file#cloud-backup--sync" target="_blank" rel="noopener">here</a> for instructions on setting up cloud uploads</span
+                >Need a key? <a href="https://cloud.vast.ai/manage-keys" target="_blank" rel="noopener">Create one on Vast.ai</a>. Check <a href="https://github.com/obsxrver/wan-training-webui?tab=readme-ov-file#cloud-backup--sync" target="_blank" rel="noopener">here</a> for instructions on setting up cloud uploads</span
               >
               <div class="api-key-row">
                 <input type="text" id="vastApiKeyInput" placeholder="Enter Vast.ai API key" autocomplete="off" spellcheck="false" />
@@ -883,7 +883,7 @@
       const apiKeyMessageEl = document.getElementById('apiKeyMessage');
       const FORM_STORAGE_KEY = 'wan-training-form-data';
       const DATASET_CONFIG_CUSTOM_VALUE = '__custom__';
-      const DATASET_CONFIG_DIR = '/workspace/wan22-lora-training/dataset-configs';
+      const DATASET_CONFIG_DIR = '/workspace/wan-training-webui/dataset-configs';
       let datasetConfigOptions = [];
       let currentCloudStatus = null;
       let trainingRunning = false;

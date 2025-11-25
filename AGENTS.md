@@ -1,4 +1,4 @@
-#wan22-lora-training. 
+#wan-training-webui. 
 This is a tool that started out as a simple training script for Wan 2.2 LoRA. It has since expanded to include a full FastAPI-Flask WebUI for training. 
 The repository is designed to be used with Vast.AI, and is automatically porovisioned with a custom template. This is how it works: 
 1. The instance template is created on vast.ai by customizing the existing PyTorch (Vast) template and setting vast_provision.sh set as the startup script. 

@@ -29,7 +29,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 RUN_SCRIPT = REPO_ROOT / "run_wan_training.sh"
 INDEX_HTML_PATH = Path(__file__).with_name("index.html")
 DATASET_ROOT = Path("/workspace/musubi-tuner/dataset")
-DATASET_CONFIG_ROOT = Path("/workspace/wan22-lora-training/dataset-configs")
+DATASET_CONFIG_ROOT = Path("/workspace/wan-training-webui/dataset-configs")
 LOG_DIR = Path("/workspace/musubi-tuner")
 HIGH_LOG = LOG_DIR / "run_high.log"
 LOW_LOG = LOG_DIR / "run_low.log"
@@ -431,7 +431,7 @@ async def _probe_video_fps(path: Path, ffprobe_path: str) -> Optional[float]:
 
 
 DEFAULT_DATASET_CONFIG = DATASET_CONFIG_ROOT / "dataset.toml"
-DATASET_CONFIG_FALLBACK_URL = "https://raw.githubusercontent.com/obsxrver/wan22-lora-training/refs/heads/main/dataset-configs/dataset.toml"
+DATASET_CONFIG_FALLBACK_URL = "https://raw.githubusercontent.com/obsxrver/wan-training-webui/refs/heads/main/dataset-configs/dataset.toml"
 
 
 def _download_dataset_config(config_path: Path) -> None:
