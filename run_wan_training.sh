@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Simple WAN2.2 LoRA training runner
-# - Prompts for title suffix, author, and dataset path (with sensible defaults)
+# - Prompts for title prefix, author, and dataset path (with sensible defaults)
 # - Caches latents and text encoder outputs
 # - Trains HIGH noise and LOW noise models
 # - If 2+ GPUs are free, runs them concurrently; otherwise waits for a free GPU
@@ -20,7 +20,7 @@ I2V_HIGH_DIT="$MUSUBI_DIR/models/diffusion_models/split_files/diffusion_models/w
 I2V_LOW_DIT="$MUSUBI_DIR/models/diffusion_models/split_files/diffusion_models/wan2.2_i2v_low_noise_14B_fp16.safetensors"
 
 # CLI overrides (populated via command line flags or environment variables)
-TITLE_SUFFIX_INPUT="${WAN_TITLE_SUFFIX:-}"
+TITLE_PREFIX_INPUT="${WAN_TITLE_PREFIX:-}"
 AUTHOR_INPUT="${WAN_AUTHOR:-}"
 DATASET_INPUT="${WAN_DATASET_PATH:-}"
 SAVE_EVERY_INPUT="${WAN_SAVE_EVERY:-}"
@@ -42,7 +42,7 @@ print_usage() {
 Usage: run_wan_training.sh [options]
 
 Optional arguments (all fall back to interactive prompts when omitted):
-  --title-suffix VALUE             Set the title suffix for output names
+  --title-prefix VALUE             Set the title prefix for output names
   --author VALUE                   Set the metadata author
   --dataset PATH                   Path to dataset configuration toml
   --save-every N                   Save every N epochs
@@ -57,7 +57,7 @@ Optional arguments (all fall back to interactive prompts when omitted):
   --help                           Show this message and exit
 
 Environment variable overrides:
-  WAN_TITLE_SUFFIX, WAN_AUTHOR, WAN_DATASET_PATH, WAN_SAVE_EVERY,
+  WAN_TITLE_PREFIX, WAN_AUTHOR, WAN_DATASET_PATH, WAN_SAVE_EVERY,
   WAN_MAX_EPOCHS, WAN_CPU_THREADS_PER_PROCESS, WAN_MAX_DATA_LOADER_WORKERS,
   WAN_UPLOAD_CLOUD, WAN_SHUTDOWN_INSTANCE, WAN_TRAINING_MODE,
   WAN_NOISE_MODE
@@ -80,8 +80,8 @@ normalize_yes_no() {
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --title-suffix)
-      TITLE_SUFFIX_INPUT="$2"
+    --title-prefix)
+      TITLE_PREFIX_INPUT="$2"
       shift 2
       ;;
     --author)
@@ -540,19 +540,19 @@ main() {
   # Prompt inputs with defaults
   echo "WAN2.2 LoRA simple runner"
 
-  if [[ -z "${TITLE_SUFFIX_INPUT:-}" ]]; then
+  if [[ -z "${TITLE_PREFIX_INPUT:-}" ]]; then
     if (( AUTO_CONFIRM )); then
-      TITLE_SUFFIX="mylora"
-      echo "Title suffix (auto default): $TITLE_SUFFIX"
+      TITLE_PREFIX="mylora"
+      echo "Title prefix (auto default): $TITLE_PREFIX"
     else
-      read -r -p "Title suffix (default: mylora): " TITLE_SUFFIX || true
+      read -r -p "Title prefix (default: mylora): " TITLE_PREFIX || true
     fi
   else
-    TITLE_SUFFIX="$TITLE_SUFFIX_INPUT"
-    echo "Title suffix (auto): $TITLE_SUFFIX"
+    TITLE_PREFIX="$TITLE_PREFIX_INPUT"
+    echo "Title prefix (auto): $TITLE_PREFIX"
   fi
-  TITLE_SUFFIX=${TITLE_SUFFIX:-mylora}
-  TITLE_SUFFIX="$(echo "$TITLE_SUFFIX" | tr '[:space:]' '-')"
+  TITLE_PREFIX=${TITLE_PREFIX:-mylora}
+  TITLE_PREFIX="$(echo "$TITLE_PREFIX" | tr '[:space:]' '-')"
 
   if [[ -z "${AUTHOR_INPUT:-}" ]]; then
     if (( AUTO_CONFIRM )); then
@@ -639,15 +639,15 @@ main() {
       TRAIN_TASK="t2v-A14B"
       HIGH_DIT="$T2V_HIGH_DIT"
       LOW_DIT="$T2V_LOW_DIT"
-      HIGH_TITLE="WAN2.2-T2V-HighNoise_${TITLE_SUFFIX}"
-      LOW_TITLE="WAN2.2-T2V-LowNoise_${TITLE_SUFFIX}"
+      HIGH_TITLE="${TITLE_PREFIX}_Wan2.2_high"
+      LOW_TITLE="${TITLE_PREFIX}_Wan2.2_low"
       ;;
     i2v)
       TRAIN_TASK="i2v-A14B"
       HIGH_DIT="$I2V_HIGH_DIT"
       LOW_DIT="$I2V_LOW_DIT"
-      HIGH_TITLE="WAN2.2-I2V-HighNoise_${TITLE_SUFFIX}"
-      LOW_TITLE="WAN2.2-I2V-LowNoise_${TITLE_SUFFIX}"
+      HIGH_TITLE="${TITLE_PREFIX}_Wan2.2_high"
+      LOW_TITLE="${TITLE_PREFIX}_Wan2.2_low"
       CACHE_LATENTS_ARGS+=(--i2v)
       ;;
     *)
@@ -1015,7 +1015,7 @@ main() {
   echo "✅ Training completed!"
 
   OUTPUT_DIR="$MUSUBI_DIR/output"
-  RENAMED_OUTPUT="$MUSUBI_DIR/output-${TITLE_SUFFIX}"
+  RENAMED_OUTPUT="$MUSUBI_DIR/output-${TITLE_PREFIX}"
   if [[ -d "$OUTPUT_DIR" ]]; then
     mv "$OUTPUT_DIR" "$RENAMED_OUTPUT"
   fi
@@ -1039,7 +1039,7 @@ main() {
   if [[ "$UPLOAD_CLOUD" =~ ^[Yy]$ ]]; then
     echo ""
     echo "=== Uploading to Cloud Storage ==="
-    upload_to_cloud "$RENAMED_OUTPUT" "${TITLE_SUFFIX}" || echo "Failed to upload output directory"
+    upload_to_cloud "$RENAMED_OUTPUT" "${TITLE_PREFIX}" || echo "Failed to upload output directory"
   fi
   
   if [[ "$SHUTDOWN_INSTANCE" =~ ^[Yy]$ ]]; then

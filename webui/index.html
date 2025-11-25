@@ -684,8 +684,8 @@
         <form id="trainingForm">
           <div class="form-row two-col">
             <label>
-              Title suffix
-              <input type="text" name="titleSuffix" value="mylora" required />
+              Title prefix
+              <input type="text" name="titlePrefix" value="mylora" required />
             </label>
             <label>
               Author
@@ -1049,8 +1049,8 @@
         });
       }
 
-      function getTitleSuffixValue() {
-        const input = form.querySelector('input[name="titleSuffix"]');
+      function getTitlePrefixValue() {
+        const input = form.querySelector('input[name="titlePrefix"]');
         return input ? input.value.trim() : '';
       }
 
@@ -1059,9 +1059,9 @@
           return;
         }
         const baseTitle = '3. Live progress';
-        const suffix = getTitleSuffixValue();
-        if (isRunning && suffix) {
-          liveProgressHeading.textContent = `${baseTitle}: ${suffix}`;
+        const prefix = getTitlePrefixValue();
+        if (isRunning && prefix) {
+          liveProgressHeading.textContent = `${baseTitle}: ${prefix}`;
         } else {
           liveProgressHeading.textContent = baseTitle;
         }
@@ -1073,9 +1073,9 @@
         updateLiveProgressHeading(trainingRunning);
         form.addEventListener('input', saveFormState);
         form.addEventListener('change', saveFormState);
-        const titleSuffixInput = form.querySelector('input[name="titleSuffix"]');
-        if (titleSuffixInput) {
-          titleSuffixInput.addEventListener('input', () => updateLiveProgressHeading(trainingRunning));
+        const titlePrefixInput = form.querySelector('input[name="titlePrefix"]');
+        if (titlePrefixInput) {
+          titlePrefixInput.addEventListener('input', () => updateLiveProgressHeading(trainingRunning));
         }
       }
 
@@ -2110,7 +2110,7 @@
         const noiseMode = noiseModeRaw === 'high' || noiseModeRaw === 'low' ? noiseModeRaw : 'both';
         const selectedRuns = noiseMode === 'high' ? ['high'] : noiseMode === 'low' ? ['low'] : ['high', 'low'];
         const payload = {
-          title_suffix: (formData.get('titleSuffix') || '').toString().trim() || 'mylora',
+          title_prefix: (formData.get('titlePrefix') || '').toString().trim() || 'mylora',
           author: (formData.get('author') || '').toString().trim() || 'authorName',
           dataset_path: (formData.get('datasetPath') || '').toString().trim(),
           save_every: Number(formData.get('saveEvery')) || 100,

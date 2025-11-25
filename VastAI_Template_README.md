@@ -28,8 +28,8 @@ bash run_wan_training.sh
 ```
 
 The script will prompt you for:
-- Title suffix (default: `mylora`) → final names:
-  - `WAN2.2-HighNoise_<suffix>` and `WAN2.2-LowNoise_<suffix>`
+- Title prefix (default: `mylora`) → final names:
+  - `{TitlePrefix}_Wan2.2_high.safetensors` and `{TitlePrefix}_Wan2.2_low.safetensors`
 - Author (default: `authorName`)
 - Dataset path (default: `/workspace/wan22-lora-training/dataset-configs/dataset.toml`)
 
