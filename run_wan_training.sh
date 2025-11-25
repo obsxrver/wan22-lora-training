@@ -8,6 +8,7 @@ set -euo pipefail
 # - If 2+ GPUs are free, runs them concurrently; otherwise waits for a free GPU
 
 MUSUBI_DIR="/workspace/musubi-tuner"
+DEFAULT_DATASET="/workspace/wan22-lora-training/datasets/dataset.toml"
 PYTHON="/venv/main/bin/python"
 ACCELERATE="/venv/main/bin/accelerate" #todo install in provisioning if errors
 
@@ -17,13 +18,13 @@ T2V_HIGH_DIT="$MUSUBI_DIR/models/diffusion_models/split_files/diffusion_models/w
 T2V_LOW_DIT="$MUSUBI_DIR/models/diffusion_models/split_files/diffusion_models/wan2.2_t2v_low_noise_14B_fp16.safetensors"
 I2V_HIGH_DIT="$MUSUBI_DIR/models/diffusion_models/split_files/diffusion_models/wan2.2_i2v_high_noise_14B_fp16.safetensors"
 I2V_LOW_DIT="$MUSUBI_DIR/models/diffusion_models/split_files/diffusion_models/wan2.2_i2v_low_noise_14B_fp16.safetensors"
-DEFAULT_DATASET="$MUSUBI_DIR/dataset/dataset.toml"
 
 # CLI overrides (populated via command line flags or environment variables)
 TITLE_SUFFIX_INPUT="${WAN_TITLE_SUFFIX:-}"
 AUTHOR_INPUT="${WAN_AUTHOR:-}"
 DATASET_INPUT="${WAN_DATASET_PATH:-}"
 SAVE_EVERY_INPUT="${WAN_SAVE_EVERY:-}"
+MAX_EPOCHS_INPUT="${WAN_MAX_EPOCHS:-}"
 CPU_THREADS_INPUT="${WAN_CPU_THREADS_PER_PROCESS:-}"
 MAX_WORKERS_INPUT="${WAN_MAX_DATA_LOADER_WORKERS:-}"
 CLI_UPLOAD_CLOUD="${WAN_UPLOAD_CLOUD:-}"
@@ -45,6 +46,7 @@ Optional arguments (all fall back to interactive prompts when omitted):
   --author VALUE                   Set the metadata author
   --dataset PATH                   Path to dataset configuration toml
   --save-every N                   Save every N epochs
+  --max-epochs N                   Maximum epochs to train
   --cpu-threads-per-process N      Number of CPU threads per process
   --max-data-loader-workers N      Data loader workers
   --upload-cloud [Y|N]             Upload outputs to configured cloud storage
@@ -56,7 +58,7 @@ Optional arguments (all fall back to interactive prompts when omitted):
 
 Environment variable overrides:
   WAN_TITLE_SUFFIX, WAN_AUTHOR, WAN_DATASET_PATH, WAN_SAVE_EVERY,
-  WAN_CPU_THREADS_PER_PROCESS, WAN_MAX_DATA_LOADER_WORKERS,
+  WAN_MAX_EPOCHS, WAN_CPU_THREADS_PER_PROCESS, WAN_MAX_DATA_LOADER_WORKERS,
   WAN_UPLOAD_CLOUD, WAN_SHUTDOWN_INSTANCE, WAN_TRAINING_MODE,
   WAN_NOISE_MODE
 EOF
@@ -92,6 +94,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --save-every)
       SAVE_EVERY_INPUT="$2"
+      shift 2
+      ;;
+    --max-epochs)
+      MAX_EPOCHS_INPUT="$2"
       shift 2
       ;;
     --cpu-threads-per-process)
@@ -546,6 +552,7 @@ main() {
     echo "Title suffix (auto): $TITLE_SUFFIX"
   fi
   TITLE_SUFFIX=${TITLE_SUFFIX:-mylora}
+  TITLE_SUFFIX="$(echo "$TITLE_SUFFIX" | tr '[:space:]' '-')"
 
   if [[ -z "${AUTHOR_INPUT:-}" ]]; then
     if (( AUTO_CONFIRM )); then
@@ -652,7 +659,7 @@ main() {
   if [[ ! -f "$DATASET" ]]; then
     echo "Dataset config not found at $DATASET; downloading..."
     mkdir -p "$(dirname "$DATASET")"
-    curl -fsSL "https://raw.githubusercontent.com/obsxrver/wan22-lora-training/main/dataset.toml" -o "$DATASET" || echo "Failed to download dataset.toml" >&2
+    curl -fsSL "https://raw.githubusercontent.com/obsxrver/wan22-lora-training/main/datasets/dataset.toml" -o "$DATASET" || echo "Failed to download dataset.toml" >&2
   fi
 
   if [[ -z "${SAVE_EVERY_INPUT:-}" ]]; then
@@ -667,6 +674,19 @@ main() {
     echo "Save every N epochs (auto): $SAVE_EVERY"
   fi
   SAVE_EVERY=${SAVE_EVERY:-20}
+
+  if [[ -z "${MAX_EPOCHS_INPUT:-}" ]]; then
+    if (( AUTO_CONFIRM )); then
+      MAX_EPOCHS="100"
+      echo "Max epochs (auto default): $MAX_EPOCHS"
+    else
+      read -r -p "Max epochs (default: 100): " MAX_EPOCHS || true
+    fi
+  else
+    MAX_EPOCHS="$MAX_EPOCHS_INPUT"
+    echo "Max epochs (auto): $MAX_EPOCHS"
+  fi
+  MAX_EPOCHS=${MAX_EPOCHS:-100}
 
   CPU_PARAMS=($(calculate_cpu_params))
   DEFAULT_CPU_THREADS_PER_PROCESS=${CPU_PARAMS[0]}
@@ -794,6 +814,7 @@ main() {
     echo "  Low noise:  disabled"
   fi
   echo "  Author:     $AUTHOR"
+  echo "  Max epochs: $MAX_EPOCHS"
   echo "  Save every: $SAVE_EVERY epochs"
   echo "  Task:       $TRAIN_TASK"
   echo "  Mode:       ${training_mode^^}"
@@ -897,7 +918,7 @@ main() {
       --network_alpha 16 \
       --timestep_sampling shift \
       --discrete_flow_shift 1.0 \
-      --max_train_epochs 100 \
+      --max_train_epochs "$MAX_EPOCHS" \
       --save_every_n_epochs "$SAVE_EVERY" \
       --seed 5 \
       --optimizer_args weight_decay=0.1 \
@@ -949,7 +970,7 @@ main() {
       --network_alpha 16 \
       --timestep_sampling shift \
       --discrete_flow_shift 1.0 \
-      --max_train_epochs 100 \
+      --max_train_epochs "$MAX_EPOCHS" \
       --save_every_n_epochs "$SAVE_EVERY" \
       --seed 5 \
       --optimizer_args weight_decay=0.1 \

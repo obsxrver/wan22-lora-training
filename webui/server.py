@@ -428,9 +428,7 @@ async def _probe_video_fps(path: Path, ffprobe_path: str) -> Optional[float]:
         return None
 
 
-DATASET_CONFIG_FALLBACK_URL = (
-    "https://raw.githubusercontent.com/obsxrver/wan22-lora-training/refs/heads/main/dataset.toml"
-)
+DATASET_CONFIG_FALLBACK_URL = "https://raw.githubusercontent.com/obsxrver/wan22-lora-training/refs/heads/main/datasets/dataset.toml"
 
 
 def _download_dataset_config(config_path: Path) -> None:
@@ -572,6 +570,7 @@ class TrainRequest(BaseModel):
     author: str = Field(default="authorName", min_length=1)
     dataset_path: str = Field(default=str(DATASET_ROOT / "dataset.toml"))
     save_every: int = Field(default=100, ge=1)
+    max_epochs: int = Field(default=100, ge=1)
     cpu_threads_per_process: Optional[int] = Field(default=None, ge=1)
     max_data_loader_workers: Optional[int] = Field(default=None, ge=1)
     upload_cloud: bool = True
@@ -1423,6 +1422,7 @@ def build_command(payload: TrainRequest) -> List[str]:
     args.extend(["--author", payload.author])
     args.extend(["--dataset", payload.dataset_path])
     args.extend(["--save-every", str(payload.save_every)])
+    args.extend(["--max-epochs", str(payload.max_epochs)])
     if payload.cpu_threads_per_process is not None:
         args.extend(["--cpu-threads-per-process", str(payload.cpu_threads_per_process)])
     if payload.max_data_loader_workers is not None:

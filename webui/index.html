@@ -686,7 +686,7 @@
           <div class="form-row">
             <label>
               Dataset config path
-              <input type="text" name="datasetPath" value="/workspace/musubi-tuner/dataset/dataset.toml" required />
+              <input type="text" name="datasetPath" value="/workspace/wan22-lora-training/datasets/dataset.toml" required />
             </label>
           </div>
           <div class="form-row">
@@ -729,6 +729,12 @@
               Save every N epochs
               <input type="number" name="saveEvery" min="1" value="20" />
             </label>
+            <label>
+              Max epochs
+              <input type="number" name="maxEpochs" min="1" value="100" />
+            </label>
+          </div>
+          <div class="form-row two-col">
             <label>
               CPU threads per process (leave blank for auto)
               <input type="number" name="cpuThreads" min="1" placeholder="Auto" />
@@ -1975,6 +1981,7 @@
           author: (formData.get('author') || '').toString().trim() || 'authorName',
           dataset_path: (formData.get('datasetPath') || '').toString().trim(),
           save_every: Number(formData.get('saveEvery')) || 100,
+          max_epochs: Number(formData.get('maxEpochs')) || 100,
           cpu_threads_per_process: formData.get('cpuThreads') ? Number(formData.get('cpuThreads')) : null,
           max_data_loader_workers: formData.get('maxWorkers') ? Number(formData.get('maxWorkers')) : null,
           upload_cloud: formData.get('uploadCloud') === 'on',
