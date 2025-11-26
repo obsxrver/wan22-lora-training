@@ -1160,7 +1160,7 @@ async def dataset_bulk_caption(payload: BulkCaptionRequest) -> Dict[str, Any]:
     for file_path in dataset_root.rglob("*"):
         if not file_path.is_file() or _is_in_protected_dir(file_path):
             continue
-        if file_path.suffix.lower() not in IMAGE_EXTENSIONS:
+        if file_path.suffix.lower() not in IMAGE_EXTENSIONS and file_path.suffix.lower() not in VIDEO_EXTENSIONS:
             continue
 
         total_images += 1
