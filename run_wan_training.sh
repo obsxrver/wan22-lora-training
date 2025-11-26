@@ -506,7 +506,7 @@ calculate_cpu_params() {
 
   if [[ -n "$threads" && "$threads" =~ ^[0-9]+$ && "$threads" -gt 0 ]]; then
     cpu_threads_per_process=$((threads / 4))
-    max_data_loader_workers=$((threads / 8))
+    max_data_loader_workers=$cpu_threads_per_process
 
     if [[ "$cpu_threads_per_process" -lt 1 ]]; then
       cpu_threads_per_process=1

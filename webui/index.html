@@ -756,16 +756,6 @@
             </label>
           </div>
           <div class="form-row two-col">
-            <label>
-              CPU threads per process (leave blank for auto)
-              <input type="number" name="cpuThreads" min="1" placeholder="Auto" />
-            </label>
-            <label>
-              Max data loader workers (leave blank for auto)
-              <input type="number" name="maxWorkers" min="1" placeholder="Auto" />
-            </label>
-          </div>
-          <div class="form-row two-col">
             <label class="toggle">
               <input type="checkbox" name="uploadCloud" checked />
               Upload LoRAs to cloud storage after training
@@ -2115,8 +2105,6 @@
           dataset_path: (formData.get('datasetPath') || '').toString().trim(),
           save_every: Number(formData.get('saveEvery')) || 100,
           max_epochs: Number(formData.get('maxEpochs')) || 100,
-          cpu_threads_per_process: formData.get('cpuThreads') ? Number(formData.get('cpuThreads')) : null,
-          max_data_loader_workers: formData.get('maxWorkers') ? Number(formData.get('maxWorkers')) : null,
           upload_cloud: formData.get('uploadCloud') === 'on',
           shutdown_instance: formData.get('shutdownInstance') === 'on',
           convert_videos_to_16fps: formData.get('convertVideos') === 'on',
