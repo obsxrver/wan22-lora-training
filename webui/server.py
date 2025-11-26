@@ -69,6 +69,8 @@ TOKEN_ENV_VAR = "JUPYTER_TOKEN"
 AUTH_COOKIE_NAME = "token"
 AUTH_QUERY_PARAM = "token"
 AUTH_COOKIE_MAX_AGE = 60 * 60 * 24 * 30  # 30 days
+PUBLIC_IP_ENV_VAR = "PUBLIC_IPADDR"
+JUPYTER_PORT_ENV_VAR = "VAST_TCP_PORT_8080"
 
 
 def _load_auth_token() -> str:
@@ -84,6 +86,14 @@ def _load_auth_token() -> str:
 
 
 AUTH_TOKEN = _load_auth_token()
+
+
+def _build_jupyter_base_url() -> Optional[str]:
+    public_ip = os.environ.get(PUBLIC_IP_ENV_VAR)
+    port = os.environ.get(JUPYTER_PORT_ENV_VAR)
+    if not public_ip or not port:
+        return None
+    return f"https://{public_ip}:{port}"
 
 
 class TokenAuthMiddleware(BaseHTTPMiddleware):
@@ -806,6 +816,13 @@ async def index() -> str:
     if not INDEX_HTML_PATH.exists():
         raise HTTPException(status_code=500, detail="UI assets missing")
     return INDEX_HTML_PATH.read_text(encoding="utf-8")
+
+
+@app.get("/jupyter-info")
+async def jupyter_info() -> Dict[str, Optional[str]]:
+    base_url = _build_jupyter_base_url()
+    token = os.environ.get(TOKEN_ENV_VAR) or AUTH_TOKEN
+    return {"base_url": base_url, "token": token}
 
 
 @app.get("/dataset-configs")
