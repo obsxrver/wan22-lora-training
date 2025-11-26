@@ -404,6 +404,13 @@
         color: var(--muted);
       }
 
+      .dataset-config-actions {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 0.5rem;
+        align-items: center;
+      }
+
       label {
         display: flex;
         flex-direction: column;
@@ -697,13 +704,16 @@
               Dataset config
               <div class="dataset-config-picker">
                 <select id="datasetConfigSelect" aria-label="Dataset config preset"></select>
-                <input
-                  type="text"
-                  id="datasetPathInput"
-                  name="datasetPath"
-                  value="/workspace/wan-training-webui/dataset-configs/dataset.toml"
-                  required
-                />
+                <div class="dataset-config-actions">
+                  <input
+                    type="text"
+                    id="datasetPathInput"
+                    name="datasetPath"
+                    value="/workspace/wan-training-webui/dataset-configs/dataset.toml"
+                    required
+                  />
+                  <button type="button" id="editDatasetConfigButton" class="button-inline">Edit in Jupyter</button>
+                </div>
               </div>
               <div class="status-note">
                 Configs are loaded from /workspace/wan-training-webui/dataset-configs/.
@@ -753,16 +763,6 @@
             <label>
               Max epochs
               <input type="number" name="maxEpochs" min="1" value="100" />
-            </label>
-          </div>
-          <div class="form-row two-col">
-            <label>
-              CPU threads per process (leave blank for auto)
-              <input type="number" name="cpuThreads" min="1" placeholder="Auto" />
-            </label>
-            <label>
-              Max data loader workers (leave blank for auto)
-              <input type="number" name="maxWorkers" min="1" placeholder="Auto" />
             </label>
           </div>
           <div class="form-row two-col">
@@ -853,6 +853,7 @@
       const form = document.getElementById('trainingForm');
       const datasetConfigSelect = document.getElementById('datasetConfigSelect');
       const datasetPathInput = document.getElementById('datasetPathInput');
+      const editDatasetConfigButton = document.getElementById('editDatasetConfigButton');
       const statusEl = document.getElementById('status');
       const messageEl = document.getElementById('message');
       const startButton = document.getElementById('startButton');
@@ -884,6 +885,7 @@
       const FORM_STORAGE_KEY = 'wan-training-form-data';
       const DATASET_CONFIG_CUSTOM_VALUE = '__custom__';
       const DATASET_CONFIG_DIR = '/workspace/wan-training-webui/dataset-configs';
+      let jupyterInfo = null;
       let datasetConfigOptions = [];
       let currentCloudStatus = null;
       let trainingRunning = false;
@@ -918,6 +920,52 @@
         }
         datasetPathInput.readOnly = !isCustom;
         datasetPathInput.classList.toggle('readonly', !isCustom);
+      }
+
+      async function loadJupyterInfo() {
+        if (jupyterInfo !== null) {
+          return jupyterInfo;
+        }
+        try {
+          const response = await fetch('/jupyter-info');
+          if (!response.ok) {
+            throw new Error('Request failed');
+          }
+          jupyterInfo = await response.json();
+        } catch (error) {
+          console.warn('Unable to load Jupyter info', error);
+          jupyterInfo = null;
+        }
+        return jupyterInfo;
+      }
+
+      function updateEditDatasetButtonState() {
+        if (!editDatasetConfigButton || !datasetPathInput) {
+          return;
+        }
+        editDatasetConfigButton.disabled = datasetPathInput.value.trim() === '';
+      }
+
+      async function openDatasetConfigInJupyter() {
+        if (!datasetPathInput || !messageEl) {
+          return;
+        }
+        const datasetPath = datasetPathInput.value.trim();
+        if (!datasetPath) {
+          messageEl.textContent = 'Set a dataset config path before opening Jupyter.';
+          return;
+        }
+
+        const info = await loadJupyterInfo();
+        if (!info || !info.base_url || !info.token) {
+          messageEl.textContent = 'Jupyter connection info is unavailable.';
+          return;
+        }
+
+        const encodedPath = encodeURI(datasetPath);
+        const editUrl = `${info.base_url}/edit/${encodedPath}?token=${encodeURIComponent(info.token)}`;
+        window.open(editUrl, '_blank');
+        messageEl.textContent = 'Opening config in Jupyter…';
       }
 
       function syncDatasetSelection(value, defaultPath) {
@@ -983,6 +1031,7 @@
 
         syncDatasetSelection(datasetPathInput.value, defaultPath);
         datasetConfigSelect.disabled = false;
+        updateEditDatasetButtonState();
       }
 
       function saveFormState() {
@@ -1855,6 +1904,7 @@
           } else {
             setDatasetPathMode(true);
           }
+          updateEditDatasetButtonState();
           saveFormState();
         });
       }
@@ -1873,8 +1923,17 @@
             datasetConfigSelect.value = DATASET_CONFIG_CUSTOM_VALUE;
             setDatasetPathMode(true);
           }
+          updateEditDatasetButtonState();
         });
       }
+
+      if (editDatasetConfigButton) {
+        editDatasetConfigButton.addEventListener('click', () => {
+          openDatasetConfigInJupyter().catch((error) => console.warn('Unable to open config in Jupyter', error));
+        });
+      }
+
+      updateEditDatasetButtonState();
 
       loadDatasetConfigs().catch((error) => console.warn('Failed to populate dataset configs', error));
 
@@ -2115,8 +2174,6 @@
           dataset_path: (formData.get('datasetPath') || '').toString().trim(),
           save_every: Number(formData.get('saveEvery')) || 100,
           max_epochs: Number(formData.get('maxEpochs')) || 100,
-          cpu_threads_per_process: formData.get('cpuThreads') ? Number(formData.get('cpuThreads')) : null,
-          max_data_loader_workers: formData.get('maxWorkers') ? Number(formData.get('maxWorkers')) : null,
           upload_cloud: formData.get('uploadCloud') === 'on',
           shutdown_instance: formData.get('shutdownInstance') === 'on',
           convert_videos_to_16fps: formData.get('convertVideos') === 'on',
