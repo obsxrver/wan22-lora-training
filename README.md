@@ -14,7 +14,7 @@ A full-featured WebUI for training Wan 2.2 LoRAs on Vast.AI. Supports both Text-
 
 Use the pre-built template to skip manual setup. This template automatically installs dependencies, downloads the 14B models (T2V & I2V), and launches the WebUI.
 
-- **Template:** [Wan 2.2 LoRA Training Quickstart](https://cloud.vast.ai/?ref_id=208628&creator_id=208628&name=Wan%202.2%20LoRA%20Training%20Quickstart)
+- **Template:** [Wan 2.2 LoRA Training WebUI](https://cloud.vast.ai/?ref_id=208628&creator_id=208628&name=Wan%202.2%20LoRA%20Training%20WebUI)
 
 **Recommended Hardware:**
 - **2x RTX 5090 / 2x H100:** Recommended for concurrent High + Low noise training.
