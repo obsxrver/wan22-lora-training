@@ -552,7 +552,8 @@ main() {
     echo "Title prefix (auto): $TITLE_PREFIX"
   fi
   TITLE_PREFIX=${TITLE_PREFIX:-mylora}
-  TITLE_PREFIX="$(echo "$TITLE_PREFIX" | tr '[:space:]' '-')"
+  # Trim surrounding whitespace before replacing interior whitespace with dashes to avoid trailing hyphens
+  TITLE_PREFIX="$(echo "$TITLE_PREFIX" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/[[:space:]]\+/-/g')"
 
   if [[ -z "${AUTHOR_INPUT:-}" ]]; then
     if (( AUTO_CONFIRM )); then
