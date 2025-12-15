@@ -306,18 +306,32 @@
         cursor: progress;
       }
 
-      .dataset-card-media {
-        width: 100%;
-        height: 180px;
-        object-fit: cover;
+      .dataset-card-media-wrapper {
+        padding: 0.75rem;
         background: rgba(0, 0, 0, 0.35);
-        display: block;
+        display: flex;
+        align-items: center;
+        justify-content: center;
       }
 
-      .dataset-card video.dataset-card-media {
-        object-fit: cover;
+      .dataset-card-media {
         width: 100%;
-        height: 100%;
+        height: auto;
+        max-height: 240px;
+        object-fit: contain;
+        background: rgba(0, 0, 0, 0.35);
+        display: block;
+        border-radius: 10px;
+        box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+        cursor: zoom-in;
+      }
+
+      .dataset-card-media:hover,
+      .dataset-card-media:focus-visible {
+        transform: scale(1.01);
+        box-shadow: 0 10px 36px rgba(0, 0, 0, 0.4);
+        outline: none;
       }
 
       .dataset-card-body {
@@ -357,6 +371,102 @@
 
       .dataset-card-caption--empty {
         font-style: italic;
+      }
+
+      .dataset-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.85);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 2rem 1rem;
+        z-index: 1000;
+      }
+
+      .dataset-overlay.is-visible {
+        display: flex;
+      }
+
+      .dataset-overlay-content {
+        width: min(1100px, 98vw);
+        max-height: 90vh;
+        background: rgba(18, 18, 18, 0.9);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        box-shadow: 0 20px 64px rgba(0, 0, 0, 0.5);
+        padding: 1.5rem;
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+      }
+
+      .dataset-overlay-header {
+        display: flex;
+        justify-content: flex-end;
+      }
+
+      .dataset-overlay-close {
+        appearance: none;
+        border: 1px solid rgba(138, 180, 248, 0.35);
+        background: rgba(138, 180, 248, 0.12);
+        color: var(--text);
+        border-radius: 999px;
+        padding: 0.35rem 0.75rem;
+        font-size: 0.85rem;
+        cursor: pointer;
+        transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+      }
+
+      .dataset-overlay-close:hover,
+      .dataset-overlay-close:focus-visible {
+        outline: none;
+        background: rgba(138, 180, 248, 0.25);
+        border-color: rgba(138, 180, 248, 0.6);
+        transform: translateY(-1px);
+      }
+
+      .dataset-overlay-media-wrapper {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        background: rgba(0, 0, 0, 0.35);
+        border-radius: 12px;
+        padding: 1rem;
+        max-height: 70vh;
+      }
+
+      .dataset-overlay-media-slot {
+        width: 100%;
+      }
+
+      .dataset-overlay-media {
+        width: 100%;
+        height: 100%;
+        max-height: 64vh;
+        object-fit: contain;
+        border-radius: 12px;
+        background: #000;
+      }
+
+      .dataset-overlay-meta {
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+      }
+
+      .dataset-overlay-title {
+        margin: 0;
+        font-weight: 700;
+        font-size: 1rem;
+        color: var(--text);
+        word-break: break-word;
+      }
+
+      .dataset-overlay-caption {
+        margin: 0;
+        color: var(--muted);
+        white-space: pre-wrap;
       }
 
       .dataset-card-caption-editor {
@@ -680,6 +790,20 @@
             </div>
             <div id="dataset-preview-message" aria-live="polite">No dataset files uploaded yet.</div>
             <div id="dataset-grid" class="dataset-grid" role="list"></div>
+            <div id="dataset-overlay" class="dataset-overlay" aria-hidden="true" role="dialog" aria-modal="true">
+              <div class="dataset-overlay-content">
+                <div class="dataset-overlay-header">
+                  <button type="button" class="dataset-overlay-close" aria-label="Close preview">Close</button>
+                </div>
+                <div class="dataset-overlay-media-wrapper">
+                  <div id="datasetOverlayMedia" class="dataset-overlay-media-slot" aria-label="Expanded media preview"></div>
+                </div>
+                <div class="dataset-overlay-meta">
+                  <p id="datasetOverlayTitle" class="dataset-overlay-title"></p>
+                  <p id="datasetOverlayCaption" class="dataset-overlay-caption"></p>
+                </div>
+              </div>
+            </div>
           </details>
         </div>
       </section>
@@ -846,6 +970,11 @@
       const uploadSummary = document.getElementById('upload-summary');
       const datasetGrid = document.getElementById('dataset-grid');
       const datasetMessage = document.getElementById('dataset-preview-message');
+      const datasetOverlay = document.getElementById('dataset-overlay');
+      const datasetOverlayMedia = document.getElementById('datasetOverlayMedia');
+      const datasetOverlayTitle = document.getElementById('datasetOverlayTitle');
+      const datasetOverlayCaption = document.getElementById('datasetOverlayCaption');
+      const datasetOverlayClose = datasetOverlay?.querySelector('.dataset-overlay-close');
       const bulkCaptionText = document.getElementById('bulkCaptionText');
       const bulkCaptionStatus = document.getElementById('bulkCaptionStatus');
       const applyCaptionAllButton = document.getElementById('applyCaptionAll');
@@ -896,6 +1025,91 @@
       const MAX_LOG_LINES = 400;
       const logLines = [];
       const VIDEO_EXTENSION_PATTERN = /\.(mp4|mov|avi|mkv|webm|mpg|mpeg)$/i;
+
+      function closeDatasetOverlay() {
+        if (!datasetOverlay) {
+          return;
+        }
+        datasetOverlay.classList.remove('is-visible');
+        datasetOverlay.setAttribute('aria-hidden', 'true');
+        if (datasetOverlayMedia) {
+          datasetOverlayMedia.innerHTML = '';
+        }
+        if (datasetOverlayTitle) {
+          datasetOverlayTitle.textContent = '';
+        }
+        if (datasetOverlayCaption) {
+          datasetOverlayCaption.textContent = '';
+        }
+        if (document?.body) {
+          document.body.style.overflow = '';
+        }
+      }
+
+      function openDatasetOverlay({ src = '', isVideo = false, title = '', caption = '' }) {
+        if (!datasetOverlay || !datasetOverlayMedia) {
+          return;
+        }
+        datasetOverlayMedia.innerHTML = '';
+
+        const mediaEl = document.createElement(isVideo ? 'video' : 'img');
+        mediaEl.className = 'dataset-overlay-media';
+        if (isVideo) {
+          mediaEl.controls = true;
+          mediaEl.loop = true;
+          mediaEl.autoplay = true;
+          mediaEl.muted = true;
+          mediaEl.playsInline = true;
+          mediaEl.setAttribute('playsinline', '');
+          mediaEl.setAttribute('webkit-playsinline', '');
+        } else {
+          mediaEl.alt = title || 'Dataset media preview';
+        }
+
+        if (src) {
+          mediaEl.src = src;
+        }
+
+        datasetOverlayMedia.appendChild(mediaEl);
+
+        if (datasetOverlayTitle) {
+          datasetOverlayTitle.textContent = title || 'Dataset file';
+        }
+
+        if (datasetOverlayCaption) {
+          datasetOverlayCaption.textContent = caption?.trim() || NO_CAPTION_TEXT;
+        }
+
+        datasetOverlay.classList.add('is-visible');
+        datasetOverlay.setAttribute('aria-hidden', 'false');
+        if (document?.body) {
+          document.body.style.overflow = 'hidden';
+        }
+        if (typeof mediaEl.focus === 'function') {
+          mediaEl.focus({ preventScroll: true });
+        }
+      }
+
+      if (datasetOverlayClose) {
+        datasetOverlayClose.addEventListener('click', (event) => {
+          event.preventDefault();
+          closeDatasetOverlay();
+        });
+      }
+
+      if (datasetOverlay) {
+        datasetOverlay.addEventListener('click', (event) => {
+          if (event.target === datasetOverlay) {
+            closeDatasetOverlay();
+          }
+        });
+      }
+
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && datasetOverlay?.classList.contains('is-visible')) {
+          closeDatasetOverlay();
+        }
+      });
 
       function setDatasetMessage(text = '', isError = false) {
         if (!datasetMessage) {
@@ -1385,7 +1599,10 @@
         if (mediaPath) {
           mediaElement.title = mediaPath;
         }
-        card.appendChild(mediaElement);
+        const mediaWrapper = document.createElement('div');
+        mediaWrapper.className = 'dataset-card-media-wrapper';
+        mediaWrapper.appendChild(mediaElement);
+        card.appendChild(mediaWrapper);
 
         if (mediaPath) {
           const actions = document.createElement('div');
@@ -1466,6 +1683,29 @@
         captionWrapper.appendChild(captionElement);
         captionWrapper.appendChild(captionEditor);
         body.appendChild(captionWrapper);
+
+        const handleOverlayOpen = () => {
+          const captionText = captionElement?.textContent?.trim() || NO_CAPTION_TEXT;
+          const mediaSource = mediaElement.currentSrc || mediaElement.src || mediaUrl;
+          openDatasetOverlay({
+            src: mediaSource,
+            isVideo,
+            title: mediaPath || 'Dataset file',
+            caption: captionText,
+          });
+        };
+
+        mediaElement.tabIndex = 0;
+        mediaElement.addEventListener('click', (event) => {
+          event.preventDefault();
+          handleOverlayOpen();
+        });
+        mediaElement.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            handleOverlayOpen();
+          }
+        });
 
         card.appendChild(body);
         return card;
