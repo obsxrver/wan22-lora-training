@@ -434,6 +434,7 @@
         border-radius: 12px;
         padding: 1rem;
         max-height: 70vh;
+        position: relative;
       }
 
       .dataset-overlay-media-slot {
@@ -453,6 +454,50 @@
         display: flex;
         flex-direction: column;
         gap: 0.35rem;
+      }
+
+      .dataset-overlay-nav {
+        position: absolute;
+        top: 50%;
+        transform: translateY(-50%);
+        border: 1px solid rgba(138, 180, 248, 0.35);
+        background: rgba(18, 18, 18, 0.75);
+        color: var(--text);
+        border-radius: 999px;
+        width: 2.8rem;
+        height: 2.8rem;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        box-shadow: 0 10px 24px rgba(0, 0, 0, 0.4);
+        transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+      }
+
+      .dataset-overlay-nav:hover,
+      .dataset-overlay-nav:focus-visible {
+        outline: none;
+        background: rgba(138, 180, 248, 0.2);
+        border-color: rgba(138, 180, 248, 0.6);
+        transform: translateY(-50%) translateY(-1px);
+      }
+
+      .dataset-overlay-nav:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+
+      .dataset-overlay-nav.is-hidden {
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      .dataset-overlay-nav--prev {
+        left: 0.5rem;
+      }
+
+      .dataset-overlay-nav--next {
+        right: 0.5rem;
       }
 
       .dataset-overlay-title {
@@ -796,7 +841,23 @@
                   <button type="button" class="dataset-overlay-close" aria-label="Close preview">Close</button>
                 </div>
                 <div class="dataset-overlay-media-wrapper">
+                  <button
+                    type="button"
+                    id="datasetOverlayPrev"
+                    class="dataset-overlay-nav dataset-overlay-nav--prev"
+                    aria-label="Previous media"
+                  >
+                    ‹
+                  </button>
                   <div id="datasetOverlayMedia" class="dataset-overlay-media-slot" aria-label="Expanded media preview"></div>
+                  <button
+                    type="button"
+                    id="datasetOverlayNext"
+                    class="dataset-overlay-nav dataset-overlay-nav--next"
+                    aria-label="Next media"
+                  >
+                    ›
+                  </button>
                 </div>
                 <div class="dataset-overlay-meta">
                   <p id="datasetOverlayTitle" class="dataset-overlay-title"></p>
@@ -975,6 +1036,8 @@
       const datasetOverlayTitle = document.getElementById('datasetOverlayTitle');
       const datasetOverlayCaption = document.getElementById('datasetOverlayCaption');
       const datasetOverlayClose = datasetOverlay?.querySelector('.dataset-overlay-close');
+      const datasetOverlayPrevButton = document.getElementById('datasetOverlayPrev');
+      const datasetOverlayNextButton = document.getElementById('datasetOverlayNext');
       const bulkCaptionText = document.getElementById('bulkCaptionText');
       const bulkCaptionStatus = document.getElementById('bulkCaptionStatus');
       const applyCaptionAllButton = document.getElementById('applyCaptionAll');
@@ -1025,6 +1088,8 @@
       const MAX_LOG_LINES = 400;
       const logLines = [];
       const VIDEO_EXTENSION_PATTERN = /\.(mp4|mov|avi|mkv|webm|mpg|mpeg)$/i;
+      let datasetPreviewItems = [];
+      let datasetOverlayCurrentIndex = -1;
 
       function closeDatasetOverlay() {
         if (!datasetOverlay) {
@@ -1032,6 +1097,7 @@
         }
         datasetOverlay.classList.remove('is-visible');
         datasetOverlay.setAttribute('aria-hidden', 'true');
+        datasetOverlayCurrentIndex = -1;
         if (datasetOverlayMedia) {
           datasetOverlayMedia.innerHTML = '';
         }
@@ -1046,7 +1112,45 @@
         }
       }
 
-      function openDatasetOverlay({ src = '', isVideo = false, title = '', caption = '' }) {
+      function updateOverlayNavigationState() {
+        const totalItems = Array.isArray(datasetPreviewItems) ? datasetPreviewItems.length : 0;
+        const shouldShowNav = totalItems > 1;
+        const hasPrev = shouldShowNav && datasetOverlayCurrentIndex > 0;
+        const hasNext = shouldShowNav && datasetOverlayCurrentIndex < totalItems - 1;
+
+        if (datasetOverlayPrevButton) {
+          datasetOverlayPrevButton.disabled = !hasPrev;
+          datasetOverlayPrevButton.classList.toggle('is-hidden', !shouldShowNav);
+        }
+        if (datasetOverlayNextButton) {
+          datasetOverlayNextButton.disabled = !hasNext;
+          datasetOverlayNextButton.classList.toggle('is-hidden', !shouldShowNav);
+        }
+      }
+
+      function getOverlayItemData(index, fallback = {}) {
+        const item =
+          Number.isInteger(index) && index >= 0 && index < datasetPreviewItems.length
+            ? datasetPreviewItems[index]
+            : null;
+        const baseData = typeof item?.getData === 'function' ? item.getData() : item;
+        const captionText =
+          (typeof item?.getCaption === 'function' && item.getCaption()) ||
+          baseData?.caption ||
+          fallback.caption ||
+          NO_CAPTION_TEXT;
+        const src = baseData?.src || fallback.src || '';
+        const isVideo = baseData?.isVideo ?? fallback.isVideo ?? false;
+        const title = baseData?.title || fallback.title || 'Dataset file';
+
+        if (!src) {
+          return null;
+        }
+
+        return { src, isVideo, title, caption: captionText };
+      }
+
+      function renderDatasetOverlay({ src = '', isVideo = false, title = '', caption = '' }) {
         if (!datasetOverlay || !datasetOverlayMedia) {
           return;
         }
@@ -1085,8 +1189,32 @@
         if (document?.body) {
           document.body.style.overflow = 'hidden';
         }
+        updateOverlayNavigationState();
         if (typeof mediaEl.focus === 'function') {
           mediaEl.focus({ preventScroll: true });
+        }
+      }
+
+      function openDatasetOverlay({ index = -1, fallbackData = {} } = {}) {
+        const normalizedData = getOverlayItemData(index, fallbackData);
+        if (!normalizedData) {
+          return;
+        }
+        datasetOverlayCurrentIndex = index;
+        renderDatasetOverlay(normalizedData);
+      }
+
+      function showPreviousOverlayItem() {
+        const previousIndex = datasetOverlayCurrentIndex - 1;
+        if (previousIndex >= 0) {
+          openDatasetOverlay({ index: previousIndex });
+        }
+      }
+
+      function showNextOverlayItem() {
+        const nextIndex = datasetOverlayCurrentIndex + 1;
+        if (nextIndex < datasetPreviewItems.length) {
+          openDatasetOverlay({ index: nextIndex });
         }
       }
 
@@ -1105,9 +1233,34 @@
         });
       }
 
+      if (datasetOverlayPrevButton) {
+        datasetOverlayPrevButton.addEventListener('click', (event) => {
+          event.preventDefault();
+          showPreviousOverlayItem();
+        });
+      }
+
+      if (datasetOverlayNextButton) {
+        datasetOverlayNextButton.addEventListener('click', (event) => {
+          event.preventDefault();
+          showNextOverlayItem();
+        });
+      }
+
       document.addEventListener('keydown', (event) => {
-        if (event.key === 'Escape' && datasetOverlay?.classList.contains('is-visible')) {
+        if (!datasetOverlay?.classList.contains('is-visible')) {
+          return;
+        }
+        if (event.key === 'Escape') {
           closeDatasetOverlay();
+          return;
+        }
+        if (event.key === 'ArrowLeft') {
+          event.preventDefault();
+          showPreviousOverlayItem();
+        } else if (event.key === 'ArrowRight') {
+          event.preventDefault();
+          showNextOverlayItem();
         }
       });
 
@@ -1539,7 +1692,7 @@
         }
       }
 
-      function createDatasetCard(item) {
+      function createDatasetCard(item, index = 0) {
         const card = document.createElement('article');
         card.className = 'dataset-card';
         card.setAttribute('role', 'listitem');
@@ -1559,6 +1712,9 @@
           (typeof mediaPath === 'string' && VIDEO_EXTENSION_PATTERN.test(mediaPath));
 
         const cacheKey = mediaPath || mediaUrl;
+        const cacheBuster = encodeURIComponent(cacheKey);
+        const cacheBustedUrl = mediaUrl ? `${mediaUrl}?v=${cacheBuster}` : '';
+        const overlaySrc = cacheBustedUrl || mediaUrl;
 
         let mediaElement;
         if (isVideo) {
@@ -1574,9 +1730,8 @@
           mediaElement.controls = true;
           mediaElement.setAttribute('controlslist', 'nodownload noremoteplayback');
           mediaElement.draggable = false;
-          if (mediaUrl) {
-            const cacheBuster = encodeURIComponent(cacheKey);
-            mediaElement.src = `${mediaUrl}?v=${cacheBuster}`;
+          if (cacheBustedUrl) {
+            mediaElement.src = cacheBustedUrl;
           }
           mediaElement.setAttribute(
             'aria-label',
@@ -1587,9 +1742,8 @@
           mediaElement.loading = 'lazy';
           mediaElement.decoding = 'async';
           mediaElement.draggable = false;
-          if (mediaUrl) {
-            const cacheBuster = encodeURIComponent(cacheKey);
-            mediaElement.src = `${mediaUrl}?v=${cacheBuster}`;
+          if (cacheBustedUrl) {
+            mediaElement.src = cacheBustedUrl;
           }
           mediaElement.alt = mediaPath
             ? `Dataset image ${mediaPath}`
@@ -1688,12 +1842,27 @@
           const captionText = captionElement?.textContent?.trim() || NO_CAPTION_TEXT;
           const mediaSource = mediaElement.currentSrc || mediaElement.src || mediaUrl;
           openDatasetOverlay({
-            src: mediaSource,
-            isVideo,
-            title: mediaPath || 'Dataset file',
-            caption: captionText,
+            index,
+            fallbackData: {
+              src: mediaSource,
+              isVideo,
+              title: mediaPath || 'Dataset file',
+              caption: captionText,
+            },
           });
         };
+
+        if (Number.isInteger(index) && index >= 0) {
+          datasetPreviewItems[index] = {
+            getData: () => ({
+              src: mediaElement?.currentSrc || mediaElement?.src || overlaySrc || mediaUrl || '',
+              isVideo,
+              title: mediaPath || 'Dataset file',
+              caption: captionElement?.textContent?.trim() || NO_CAPTION_TEXT,
+            }),
+            getCaption: () => captionElement?.textContent?.trim() || NO_CAPTION_TEXT,
+          };
+        }
 
         mediaElement.tabIndex = 0;
         mediaElement.addEventListener('click', (event) => {
@@ -1715,13 +1884,17 @@
         if (!datasetGrid) {
           return;
         }
+        datasetPreviewItems = Array.isArray(items) ? new Array(items.length) : [];
+        datasetOverlayCurrentIndex = -1;
+        updateOverlayNavigationState();
         datasetGrid.innerHTML = '';
         if (!items?.length) {
+          closeDatasetOverlay();
           return;
         }
         const fragment = document.createDocumentFragment();
-        items.forEach((item) => {
-          fragment.appendChild(createDatasetCard(item));
+        items.forEach((item, index) => {
+          fragment.appendChild(createDatasetCard(item, index));
         });
         datasetGrid.appendChild(fragment);
       }
@@ -1743,6 +1916,10 @@
           const items = Array.isArray(data?.items) ? data.items : [];
           if (!items.length) {
             const emptyMessage = overrideMessage ?? 'No dataset files uploaded yet.';
+            datasetPreviewItems = [];
+            datasetOverlayCurrentIndex = -1;
+            updateOverlayNavigationState();
+            closeDatasetOverlay();
             setDatasetMessage(emptyMessage, overrideMessage != null ? isError : false);
             return;
           }
