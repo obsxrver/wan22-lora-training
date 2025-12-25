@@ -170,7 +170,9 @@ TOTAL_STEP_PATTERNS = [
     re.compile(r"steps:.*\|\s*\d+\s*/\s*(\d+)")
 ]
 TIME_PATTERN = re.compile(r"\[(\d{1,2}:\d{2}(?::\d{2})?)<\s*(\d{1,2}:\d{2}(?::\d{2})?)")
-MAX_HISTORY_POINTS = 2000
+# Keep the full run history so refreshes don't drop earlier points; set to an int
+# to re-enable trimming if memory ever becomes a concern.
+MAX_HISTORY_POINTS: Optional[int] = None
 MAX_LOG_LINES = 400
 
 
@@ -785,7 +787,7 @@ class TrainingState:
             else:
                 history.append(point)
                 changed = True
-                if len(history) > MAX_HISTORY_POINTS:
+                if MAX_HISTORY_POINTS is not None and len(history) > MAX_HISTORY_POINTS:
                     del history[: len(history) - MAX_HISTORY_POINTS]
             self.current[run] = current
             entry["loss"] = None

@@ -4,8 +4,8 @@
 caption_extension = ".txt"
 batch_size = 1
 enable_bucket = true # Downscales and upscales images, preserving aspect ratio.
-bucket_no_upscale = false 
-resolution = [540, 540] # Train images at a resolution of 0.29 Megapixels
+bucket_no_upscale = true 
+resolution = [640, 640] 
 
 [[datasets]]
 image_directory = "/workspace/musubi-tuner/dataset" # If you change this, the upload feature in the webui won't work
